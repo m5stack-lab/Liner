@@ -289,7 +289,7 @@ void handleRoot() {
     "<code>pio run -t upload --upload-port liner.local</code></p></details>"
     "<details><summary>Reporting an issue</summary>"
     "<p>Include the firmware version shown above and what the device's screen shows. "
-    "<a href='https://github.com/ry-ops/Liner/issues'>Open an issue on GitHub</a>.</p></details>"
+    "<a href='https://github.com/m5stack-lab/Liner/issues'>Open an issue on GitHub</a>.</p></details>"
 
     "</body></html>";
 

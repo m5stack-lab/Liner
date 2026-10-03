@@ -1,6 +1,6 @@
 # Liner
 
-[![Release](https://img.shields.io/github/v/release/ry-ops/Liner)](https://github.com/ry-ops/Liner/releases/latest)
+[![Release](https://img.shields.io/github/v/release/m5stack-lab/Liner)](https://github.com/m5stack-lab/Liner/releases/latest)
 
 A "now playing" display for the [M5Stack PaperColor](https://docs.m5stack.com/en/core/PaperColor) — a 4" color e-paper dev board — driven by [Volumio](https://volumio.com/). It shows album art, title, and artist for whatever's currently playing, and refreshes automatically as tracks change.
 
@@ -115,7 +115,7 @@ Button polling is non-blocking (`M5.update()` runs every loop iteration; Volumio
 
 ## Setup
 
-> **Prebuilt binary:** each [release](https://github.com/ry-ops/Liner/releases) includes a merged, single-file `.bin` (flash at offset `0x0`) alongside the source — no Wi-Fi/Volumio config baked in, since that's all handled by the on-device setup portal described above. Flash it and configure it like any other build.
+> **Prebuilt binary:** each [release](https://github.com/m5stack-lab/Liner/releases) includes a merged, single-file `.bin` (flash at offset `0x0`) alongside the source — no Wi-Fi/Volumio config baked in, since that's all handled by the on-device setup portal described above. Flash it and configure it like any other build.
 
 1. Build:
    ```
