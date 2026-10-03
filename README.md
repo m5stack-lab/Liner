@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/banner.svg" alt="Liner: Now-playing liner notes on a PaperColor e-paper board" width="100%"></p>
+
 # Liner
 
 [![Release](https://img.shields.io/github/v/release/m5stack-lab/Liner)](https://github.com/m5stack-lab/Liner/releases/latest)
@@ -138,3 +140,8 @@ From here on, firmware updates can go over OTA (`pio run -t upload --upload-port
 - Only the Tidal album art path is verified; local/Spotify/other-service art handling is untested (see stubs in `resolveAlbumArtUrl()`).
 - The setup portal and OTA updates are both unauthenticated — fine on a trusted home LAN, not hardened against a hostile network.
 - Flashing and booting over USB both currently require manual button presses (see Setup) — software-triggered resets aren't reliable on this board/toolchain combination. OTA updates don't have this problem; they reboot on their own.
+
+<!-- org-footer -->
+---
+
+<p align="center"><sub>Part of <a href="https://github.com/m5stack-lab">m5stack-lab</a> · unofficial M5Stack projects, not affiliated with M5Stack · built by <a href="https://github.com/ry-ops">ry-ops</a></sub></p>
