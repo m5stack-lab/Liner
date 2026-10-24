@@ -1,0 +1,243 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1200" width="1600" height="1200" font-family="Menlo, Monaco, monospace">
+  <defs>
+    <pattern id="g" width="20" height="20" patternUnits="userSpaceOnUse"><path d="M20 0H0V20" fill="none" stroke="#1b3a6b" stroke-opacity="0.07"/></pattern>
+    <pattern id="G" width="100" height="100" patternUnits="userSpaceOnUse"><path d="M100 0H0V100" fill="none" stroke="#1b3a6b" stroke-opacity="0.13"/></pattern>
+    <marker id="ab" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#1b3a6b"/></marker>
+    <marker id="ag" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#2e6f40"/></marker>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#c0392b"/></marker>
+    <marker id="ak" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#1a1a1a"/></marker>
+    <symbol id="gnd" viewBox="-15 0 30 22" overflow="visible"><path d="M0 0V8M-14 8H14M-9 14H9M-4 20H4" stroke="#1a1a1a" stroke-width="2.5" fill="none"/></symbol>
+  </defs>
+
+  <!-- paper -->
+  <rect width="1600" height="1200" fill="#f3efe4"/>
+  <rect width="1600" height="1200" fill="url(#g)"/>
+  <rect width="1600" height="1200" fill="url(#G)"/>
+  <rect x="30" y="30" width="1540" height="1140" fill="none" stroke="#1a1a1a" stroke-width="3"/>
+  <rect x="40" y="40" width="1520" height="1120" fill="none" stroke="#1a1a1a" stroke-width="1"/>
+
+  <!-- ================= TITLE ================= -->
+  <g font-family="Helvetica Neue, Helvetica, Arial, sans-serif">
+    <text x="70" y="102" font-size="46" font-weight="bold" fill="#1a1a1a">LINER</text>
+    <text x="232" y="102" font-size="20" fill="#1a1a1a" letter-spacing="2">SYSTEM SCHEMATIC · NOW-PLAYING E-PAPER</text>
+    <g transform="translate(70,118)">
+      <rect width="60" height="8" fill="#1a1a1a"/><rect x="60" width="60" height="8" fill="#fbfaf5" stroke="#1a1a1a" stroke-width="1"/>
+      <rect x="120" width="60" height="8" fill="#f4c400"/><rect x="180" width="60" height="8" fill="#c0392b"/>
+      <rect x="240" width="60" height="8" fill="#1b3a6b"/><rect x="300" width="60" height="8" fill="#2e6f40"/>
+    </g>
+  </g>
+
+  <!-- ================= NETWORK ROW ================= -->
+  <!-- phone -->
+  <g transform="translate(80,175)">
+    <rect width="250" height="110" fill="#fbfaf5" stroke="#1a1a1a" stroke-width="2.5"/>
+    <text x="14" y="28" font-size="17" font-weight="bold" fill="#1a1a1a">PHONE / LAPTOP</text>
+    <text x="14" y="54" font-size="13" fill="#1a1a1a">setup: AP "Liner-Setup"</text>
+    <text x="14" y="74" font-size="13" fill="#1a1a1a">after: http://liner.local/</text>
+    <text x="14" y="96" font-size="13" fill="#1b3a6b">wifi · volumio · ota · saver</text>
+  </g>
+  <!-- volumio -->
+  <g transform="translate(400,175)">
+    <rect width="270" height="110" fill="#fbfaf5" stroke="#1a1a1a" stroke-width="2.5"/>
+    <rect width="270" height="8" fill="#1b3a6b"/>
+    <text x="14" y="34" font-size="17" font-weight="bold" fill="#1a1a1a">VOLUMIO  :3000</text>
+    <text x="14" y="58" font-size="13" fill="#1a1a1a">GET /api/v1/getState</text>
+    <text x="14" y="78" font-size="13" fill="#1a1a1a">GET /api/v1/commands/</text>
+    <text x="14" y="98" font-size="13" fill="#c0392b">    ?cmd=next | prev</text>
+  </g>
+  <!-- wsrv -->
+  <g transform="translate(940,175)">
+    <rect width="250" height="110" fill="#fbfaf5" stroke="#1a1a1a" stroke-width="2.5"/>
+    <rect width="250" height="8" fill="#2e6f40"/>
+    <text x="14" y="34" font-size="17" font-weight="bold" fill="#1a1a1a">wsrv.nl PROXY</text>
+    <text x="14" y="58" font-size="13" fill="#1a1a1a">progressive → baseline</text>
+    <text x="14" y="78" font-size="13" fill="#1a1a1a">w=400 h=400 fit=cover</text>
+    <text x="14" y="98" font-size="13" fill="#2e6f40">output=jpg</text>
+  </g>
+  <!-- tidal -->
+  <g transform="translate(1260,175)">
+    <rect width="250" height="110" fill="#fbfaf5" stroke="#1a1a1a" stroke-width="2.5"/>
+    <rect width="250" height="8" fill="#f4c400"/>
+    <text x="14" y="34" font-size="17" font-weight="bold" fill="#1a1a1a">TIDAL CDN</text>
+    <text x="14" y="58" font-size="13" fill="#1a1a1a">resources.tidal.com</text>
+    <text x="14" y="78" font-size="13" fill="#1a1a1a">album art</text>
+    <text x="14" y="98" font-size="13" fill="#c0392b">progressive JPEG ✕ TJpgDec</text>
+  </g>
+  <!-- tidal -> wsrv -->
+  <path d="M1260 230H1196" stroke="#2e6f40" stroke-width="3" fill="none" marker-end="url(#ag)"/>
+  <text x="1228" y="222" font-size="11" fill="#2e6f40" text-anchor="middle">src</text>
+
+  <!-- WLAN bus -->
+  <path d="M205 285V340H800" stroke="#1b3a6b" stroke-width="3" fill="none"/>
+  <path d="M1065 285V340H800" stroke="#2e6f40" stroke-width="3" fill="none"/>
+  <path d="M535 285V340" stroke="#1b3a6b" stroke-width="3"/>
+  <circle cx="535" cy="340" r="5" fill="#1b3a6b"/><circle cx="800" cy="340" r="5" fill="#1b3a6b"/>
+  <text x="560" y="332" font-size="12" fill="#1b3a6b" font-weight="bold">WLAN · 2.4 GHz · HTTP</text>
+  <text x="884" y="332" font-size="12" fill="#2e6f40" font-weight="bold">art ≈35 KB baseline</text>
+  <!-- antenna -->
+  <path d="M800 340V392" stroke="#1b3a6b" stroke-width="3"/>
+  <path d="M786 352L800 372L814 352" stroke="#1b3a6b" stroke-width="2.5" fill="none" transform="translate(0,-8)"/>
+  <text x="812" y="384" font-size="12" fill="#1b3a6b">ANT1</text>
+
+  <!-- ================= U1 ESP32-S3 ================= -->
+  <g>
+    <rect x="600" y="392" width="400" height="400" fill="#fbfaf5" stroke="#1a1a1a" stroke-width="3"/>
+    <circle cx="620" cy="412" r="6" fill="#1a1a1a"/>
+    <text x="800" y="428" text-anchor="middle" font-size="22" font-weight="bold" fill="#1a1a1a">U1  ESP32-S3R8</text>
+    <text x="800" y="450" text-anchor="middle" font-size="12" fill="#555">M5STACK PAPERCOLOR · ARDUINO / PLATFORMIO</text>
+    <g font-size="13" fill="#1a1a1a">
+      <rect x="630" y="470" width="165" height="54" fill="none" stroke="#1a1a1a" stroke-dasharray="4 3"/>
+      <text x="642" y="493" font-weight="bold">FLASH 16 MB</text><text x="642" y="513">firmware + OTA</text>
+      <rect x="805" y="470" width="165" height="54" fill="none" stroke="#1a1a1a" stroke-dasharray="4 3"/>
+      <text x="817" y="493" font-weight="bold">PSRAM 8 MB</text><text x="817" y="513">octal SPI</text>
+      <rect x="630" y="536" width="340" height="62" fill="none" stroke="#1a1a1a" stroke-dasharray="4 3"/>
+      <text x="642" y="559" font-weight="bold">NVS  (Preferences)</text><text x="642" y="582">ssid · pass · volumio host · ota · saver</text>
+      <rect x="630" y="610" width="340" height="80" fill="none" stroke="#1b3a6b" stroke-dasharray="4 3"/>
+      <text x="642" y="633" font-weight="bold" fill="#1b3a6b">NET STACK</text>
+      <text x="642" y="655">mDNS liner.local · portal :80</text>
+      <text x="642" y="677">OTA · HTTP(S) client</text>
+      <rect x="630" y="702" width="340" height="68" fill="none" stroke="#2e6f40" stroke-dasharray="4 3"/>
+      <text x="642" y="725" font-weight="bold" fill="#2e6f40">M5Unified / M5GFX</text>
+      <text x="642" y="747">RGB888 canvas → drawJpg()</text>
+    </g>
+    <!-- left pins -->
+    <g font-size="13" fill="#1a1a1a">
+      <path d="M560 470H600M560 560H600M560 650H600M560 740H600" stroke="#1a1a1a" stroke-width="2.5"/>
+      <text x="606" y="465" font-size="10">1</text><text x="606" y="555" font-size="10">10</text><text x="606" y="645" font-size="10">9</text><text x="606" y="735" font-size="10">EN</text>
+    </g>
+    <!-- right pins -->
+    <path d="M1000 500H1100" stroke="#1a1a1a" stroke-width="7"/>
+    <path d="M1000 500H1100" stroke="#fbfaf5" stroke-width="2"/>
+    <text x="1008" y="488" font-size="12" font-weight="bold" fill="#1a1a1a">EPD BUS</text>
+    <text x="1008" y="524" font-size="11" fill="#555">Panel_ED2208</text>
+  </g>
+
+  <!-- ================= BUTTONS ================= -->
+  <g font-size="13" fill="#1a1a1a">
+    <!-- generic switch at y -->
+    <g id="sw1">
+      <path d="M560 470H470" stroke="#c0392b" stroke-width="2.5"/>
+      <circle cx="466" cy="470" r="4" fill="#fbfaf5" stroke="#1a1a1a" stroke-width="2"/>
+      <circle cx="414" cy="470" r="4" fill="#fbfaf5" stroke="#1a1a1a" stroke-width="2"/>
+      <path d="M418 468L462 448" stroke="#1a1a1a" stroke-width="2.5"/>
+      <path d="M440 446V438M432 438H448" stroke="#1a1a1a" stroke-width="2"/>
+      <path d="M410 470H380V480" stroke="#1a1a1a" stroke-width="2.5" fill="none"/>
+      <path d="M380 480V488M366 488H394M371 494H389M376 500H384" stroke="#1a1a1a" stroke-width="2.5" fill="none"/>
+    </g>
+    <use href="#sw1" y="90"/><use href="#sw1" y="180"/>
+    <text x="80" y="456" font-weight="bold">SW_TOP · GPIO1</text>
+    <text x="80" y="476" fill="#c0392b">→ setup portal</text>
+    <text x="80" y="494" fill="#555" font-size="11">disconnects first if online</text>
+    <text x="80" y="546" font-weight="bold">SW_UP · GPIO10</text>
+    <text x="80" y="566" fill="#c0392b">→ cmd=next</text>
+    <text x="80" y="636" font-weight="bold">SW_DOWN · GPIO9</text>
+    <text x="80" y="656" fill="#c0392b">→ cmd=prev</text>
+    <!-- power -->
+    <path d="M560 740H470" stroke="#1a1a1a" stroke-width="2.5"/>
+    <circle cx="466" cy="740" r="4" fill="#fbfaf5" stroke="#1a1a1a" stroke-width="2"/>
+    <circle cx="414" cy="740" r="4" fill="#fbfaf5" stroke="#1a1a1a" stroke-width="2"/>
+    <path d="M418 738L462 718" stroke="#1a1a1a" stroke-width="2.5"/>
+    <path d="M440 716V708M432 708H448" stroke="#1a1a1a" stroke-width="2"/>
+    <text x="80" y="736" font-weight="bold">SW_PWR</text>
+    <text x="80" y="756" fill="#555" font-size="11">press once after USB flash</text>
+    <text x="80" y="784" fill="#555" font-size="11">non-blocking: M5.update() every loop</text>
+  </g>
+
+  <!-- ================= PANEL ================= -->
+  <g>
+    <rect x="1100" y="392" width="410" height="400" fill="#fbfaf5" stroke="#1a1a1a" stroke-width="3"/>
+    <text x="1305" y="428" text-anchor="middle" font-size="22" font-weight="bold" fill="#1a1a1a">DS1  E-PAPER 4"</text>
+    <text x="1305" y="450" text-anchor="middle" font-size="12" fill="#555">E INK SPECTRA 6 · 400 × 600</text>
+    <!-- mini screen -->
+    <g transform="translate(1135,472)">
+      <rect width="140" height="210" fill="#faf9f6" stroke="#1a1a1a" stroke-width="2"/>
+      <rect x="10" y="10" width="120" height="120" fill="#1b3a6b"/>
+      <circle cx="94" cy="54" r="22" fill="#f4c400"/><circle cx="94" cy="54" r="12" fill="#c0392b"/>
+      <path d="M10 100Q25 90 40 100T70 100T100 100T130 100V130H10Z" fill="#2e6f40"/>
+      <path d="M10 114Q25 104 40 114T70 114T100 114T130 114V130H10Z" fill="#1a1a1a"/>
+      <rect x="10" y="142" width="80" height="8" fill="#1a1a1a"/>
+      <rect x="10" y="158" width="60" height="5" fill="#1a1a1a"/>
+      <rect x="10" y="170" width="48" height="4" fill="#1a1a1a"/>
+      <rect x="10" y="184" width="112" height="7" fill="#1a1a1a"/>
+    </g>
+    <g font-size="12" fill="#1a1a1a">
+      <text x="1290" y="486" font-weight="bold">ART  400×400</text>
+      <text x="1290" y="616" font-weight="bold">TITLE</text>
+      <text x="1290" y="632">ARTIST · ALBUM</text>
+      <text x="1290" y="660" font-weight="bold">META LINE</text>
+      <text x="1290" y="676" fill="#c0392b">TIDAL 384kHz/32bit</text>
+      <text x="1290" y="692" fill="#c0392b">· 24576 kbps</text>
+      <path d="M1278 482H1286M1278 612H1286M1278 656H1286" stroke="#1a1a1a"/>
+    </g>
+    <!-- palette -->
+    <g transform="translate(1135,712)" font-size="10" fill="#1a1a1a">
+      <text x="0" y="-6" font-weight="bold" font-size="12">QUANTIZE ON display()</text>
+      <rect width="50" height="22" fill="#1a1a1a"/><rect x="56" width="50" height="22" fill="#faf9f6" stroke="#1a1a1a"/>
+      <rect x="112" width="50" height="22" fill="#f4c400"/><rect x="168" width="50" height="22" fill="#c0392b"/>
+      <rect x="224" width="50" height="22" fill="#1b3a6b"/><rect x="280" width="50" height="22" fill="#2e6f40"/>
+      <text x="0" y="40">full refresh 15–30 s → redraw only on track change</text>
+    </g>
+  </g>
+
+  <!-- ================= FIRMWARE LOOP ================= -->
+  <g font-size="13" fill="#1a1a1a">
+    <text x="70" y="860" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="20" font-weight="bold" letter-spacing="2">MAIN LOOP  ·  loop()</text>
+    <g stroke="#1a1a1a" stroke-width="2.5" fill="#fbfaf5">
+      <rect x="70" y="890" width="170" height="70"/>
+      <rect x="290" y="890" width="190" height="70"/>
+      <path d="M610 885L690 925L610 965L530 925Z"/>
+      <rect x="740" y="890" width="200" height="70"/>
+      <rect x="990" y="890" width="150" height="70"/>
+    </g>
+    <text x="155" y="920" text-anchor="middle" font-weight="bold">M5.update()</text>
+    <text x="155" y="942" text-anchor="middle" fill="#c0392b">read buttons</text>
+    <text x="385" y="920" text-anchor="middle" font-weight="bold">poll getState</text>
+    <text x="385" y="942" text-anchor="middle" fill="#1b3a6b">every few s</text>
+    <text x="610" y="921" text-anchor="middle" font-weight="bold" font-size="12">track</text>
+    <text x="610" y="937" text-anchor="middle" font-weight="bold" font-size="12">changed?</text>
+    <text x="840" y="920" text-anchor="middle" font-weight="bold" font-size="12">resolveAlbumArtUrl()</text>
+    <text x="840" y="942" text-anchor="middle" fill="#2e6f40">by service</text>
+    <text x="1065" y="920" text-anchor="middle" font-weight="bold">draw +</text>
+    <text x="1065" y="942" text-anchor="middle" font-weight="bold">display()</text>
+    <g stroke="#1a1a1a" stroke-width="2.5" fill="none">
+      <path d="M240 925H288" marker-end="url(#ak)"/>
+      <path d="M480 925H528" marker-end="url(#ak)"/>
+      <path d="M690 925H738" marker-end="url(#ak)"/>
+      <path d="M940 925H988" marker-end="url(#ak)"/>
+      <path d="M610 965V1010H155V962" marker-end="url(#ak)"/>
+      <path d="M1065 960V1030H155V1010"/>
+    </g>
+    <text x="704" y="916" font-size="11" font-weight="bold">YES</text>
+    <text x="620" y="1000" font-size="11" font-weight="bold">NO</text>
+    <text x="70" y="1068" font-size="12" fill="#555">mpd → local /albumart direct · tidal → wsrv.nl proxy · spop / volspotconnect2 → stubs</text>
+    <text x="70" y="1088" font-size="12" fill="#555">idle 5 min → generative Spectra 6 screensaver, new pattern every 10 min</text>
+  </g>
+
+  <!-- legend -->
+  <g font-size="12" fill="#1a1a1a" transform="translate(70,1112)">
+    <path d="M0 0H40" stroke="#1b3a6b" stroke-width="3"/><text x="48" y="4">network / HTTP</text>
+    <path d="M190 0H230" stroke="#2e6f40" stroke-width="3"/><text x="238" y="4">album-art path</text>
+    <path d="M380 0H420" stroke="#c0392b" stroke-width="3"/><text x="428" y="4">user control</text>
+    <path d="M550 0H590" stroke="#1a1a1a" stroke-width="3"/><text x="598" y="4">internal / flow</text>
+  </g>
+
+  <!-- ================= TITLE BLOCK ================= -->
+  <g transform="translate(1190,850)" font-size="12" fill="#1a1a1a">
+    <rect width="340" height="280" fill="#fbfaf5" stroke="#1a1a1a" stroke-width="3"/>
+    <path d="M0 60H340M0 110H340M0 160H340M0 210H340M170 110V210" stroke="#1a1a1a" stroke-width="1.5"/>
+    <text x="14" y="24" fill="#555">TITLE</text>
+    <text x="14" y="48" font-size="20" font-weight="bold">LINER · SYSTEM</text>
+    <text x="14" y="78" fill="#555">PROJECT</text>
+    <text x="14" y="98" font-size="14" font-weight="bold">github.com/m5stack-lab/Liner</text>
+    <text x="14" y="128" fill="#555">BOARD</text><text x="14" y="148" font-weight="bold">M5Stack PaperColor</text>
+    <text x="184" y="128" fill="#555">HOST</text><text x="184" y="148" font-weight="bold">Volumio REST</text>
+    <text x="14" y="178" fill="#555">DRAWN</text><text x="14" y="198" font-weight="bold">ry-ops</text>
+    <text x="184" y="178" fill="#555">DATE</text><text x="184" y="198" font-weight="bold">2026-10-24</text>
+    <text x="14" y="236" fill="#555">SHEET</text><text x="14" y="258" font-size="16" font-weight="bold">1 / 1</text>
+    <g transform="translate(170,236)">
+      <rect width="22" height="22" fill="#1a1a1a"/><rect x="26" width="22" height="22" fill="#faf9f6" stroke="#1a1a1a"/>
+      <rect x="52" width="22" height="22" fill="#f4c400"/><rect x="78" width="22" height="22" fill="#c0392b"/>
+      <rect x="104" width="22" height="22" fill="#1b3a6b"/><rect x="130" width="22" height="22" fill="#2e6f40"/>
+    </g>
+  </g>
+</svg>

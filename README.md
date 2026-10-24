@@ -30,6 +30,10 @@ The name is a nod to *liner notes* — the printed text and art that ship inside
 
 ## How it works
 
+<p align="center">
+  <img src="docs/liner-schematic.png" alt="Liner system schematic: Volumio, Tidal CDN and the wsrv.nl proxy over Wi-Fi into the ESP32-S3, the GPIO buttons, the Spectra 6 e-paper panel, and the main poll/redraw loop" width="100%">
+</p>
+
 ### Firmware
 
 Built with [PlatformIO](https://platformio.org/) on the Arduino framework, using [M5Unified](https://github.com/m5stack/M5Unified) / [M5GFX](https://github.com/m5stack/M5GFX). `M5.begin()` auto-detects the PaperColor board and its `Panel_ED2208` e-paper driver — the firmware just draws normal RGB888 graphics, and the panel driver quantizes everything down to the 6-color Spectra palette automatically on `display()`.
