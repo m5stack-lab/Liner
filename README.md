@@ -18,7 +18,9 @@ The name is a nod to *liner notes* — the printed text and art that ship inside
 - **Idle screen** when nothing is playing, cycling into a generative Spectra-6 screensaver after a long idle stretch
 - **Event-driven refresh** — only redraws when the track actually changes, since a full e-paper refresh takes 15–30 seconds
 - **Playback controls** — up/down buttons skip to the next/previous track
-- **On-device Wi-Fi & settings portal** — no credentials baked into the firmware; a mobile-first web page (reachable both during first-time setup and, once connected, at `liner.local` on your normal LAN) shows a live Now Playing card and handles network/Volumio config, OTA and screensaver toggles, and troubleshooting tips, organized behind a hamburger nav
+- **Web dashboard** — no credentials baked into the firmware; a responsive dashboard (reachable both during first-time setup and, once connected, at `liner.local` on your normal LAN) shows a live Now Playing card and device status, and handles network/Volumio config, instant OTA/screensaver toggles, an optional password, and troubleshooting tips. Phones get bottom tabs; tablets and desktops get header tabs and a two-column layout
+- **QR codes on the screen** — when Liner isn't on Wi-Fi, the panel shows a QR to join its setup network and one to open setup; when Volumio can't be reached, it shows a QR to the dashboard
+- **Optional web password** — one switch in the dashboard; HTTP digest auth (username `liner`), and a 5-second hold of the top button removes it if forgotten
 - **OTA updates** — push new firmware over the network once it's on Wi-Fi, no more re-entering download mode for every change
 - **Album art from any source** — local files, Tidal, and (untested so far) Spotify/other Volumio plugins, via a service-aware resolver
 
@@ -42,14 +44,22 @@ Because a full refresh takes 15–30 seconds, the main loop polls Volumio for st
 
 ### Wi-Fi setup and settings (no baked-in credentials)
 
-Wi-Fi credentials and the Volumio host aren't compile-time config — they live in NVS (via `Preferences`), set through a small mobile-first web page. This is what lets one built binary (e.g. a release `.bin`, or something distributed through M5Burner) work for anyone, rather than requiring everyone to rebuild from source with their own network baked in.
+Wi-Fi credentials and the Volumio host aren't compile-time config — they live in NVS (via `Preferences`), set through the device's web dashboard. This is what lets one built binary (e.g. a release `.bin`, or something distributed through M5Burner) work for anyone, rather than requiring everyone to rebuild from source with their own network baked in.
 
 The same page serves two purposes depending on context:
 
-- **First-time setup** — opens automatically on first boot, if a saved network fails to connect, or any time you press the **top button** (which disconnects Wi-Fi first if already connected, so it doubles as an on-demand "switch networks" trigger). In this mode the device broadcasts its own access point (`Liner-Setup`); the screen shows that name and an IP to browse to.
-- **Ongoing settings, once connected** — the same page is also reachable at `http://liner.local/` (or the device's LAN IP) during normal operation, no need to disconnect from your real network to reach it. From here you can change the network/Volumio host, or flip the **OTA updates** and **idle screensaver** toggles, without interrupting playback unless you actually change the network.
+- **First-time setup** — opens automatically on first boot, if a saved network fails to connect, or any time you press the **top button** (which disconnects Wi-Fi first if already connected, so it doubles as an on-demand "switch networks" trigger). In this mode the device broadcasts its own access point (`Liner-Setup`) and the screen shows two QR codes: scan the first to join `Liner-Setup`, the second to open the dashboard. Most phones also open it on their own, because every web request on that network is redirected to the dashboard (a captive portal). If setup mode started on its own because Wi-Fi was lost, Liner retries the saved network every 2 minutes while nobody is connected to `Liner-Setup`.
+- **Ongoing settings, once connected** — the same page is also reachable at `http://liner.local/` (or the device's LAN IP) during normal operation, no need to disconnect from your real network to reach it. From here you can change the network/Volumio host, or flip the **OTA updates**, **idle screensaver** and **password protection** switches. Switches apply as soon as you tap them, and nothing interrupts playback unless you change the network.
 
 Saving with the network/password unchanged just updates settings in place; changing either triggers a reconnect (and, if it's mid-setup, exits the AP).
+
+If Volumio stops answering for about 15 seconds, the screen switches to a "Can't reach Volumio" page with a QR code to the dashboard, and goes back to Now Playing once Volumio answers again.
+
+The dashboard is one static page served from flash (`include/web_ui.h`). It reads everything from a small JSON API (`/api/status`, `/api/scan`, `/api/options`, `/api/auth`, `/save`) and inserts device data as text, never as HTML. Requests that change settings must carry an `X-Liner` header, which the dashboard always sends and other websites can't, so a page open elsewhere in your browser can't change Liner's settings.
+
+### Password protection
+
+Off by default. Turn on **Password protection** in Settings and pick a password (4–64 characters). The browser then asks for it, with username `liner`. It uses HTTP digest auth, so the password isn't sent in clear text, though the rest of the page is still plain HTTP. Forgot it? Hold the device's **top button for 5 seconds**: the password is removed and the screen confirms it. The password protects the dashboard only, not OTA (see below).
 
 The page also shows a **Now Playing** card (album art, title/artist/album, the platform/format/bitrate line) sourced from the same state the e-paper display uses — cached from the most recent Volumio poll rather than making its own extra request, so loading the page doesn't add load on Volumio.
 
@@ -61,7 +71,7 @@ Once connected, the device advertises itself at `liner.local` and accepts firmwa
 pio run -t upload --upload-port liner.local
 ```
 
-No password is set — this matches the setup portal's own trust model (convenience on a local network you already trust, not hardened against a hostile LAN). The very first flash still has to go over USB (see Setup below); every update after that can go over OTA instead.
+OTA is on by default and has no password (convenience on a local network you already trust, not hardened against a hostile LAN). Turn it off with the **OTA updates** switch in the dashboard: that stops the OTA listener and its `_arduino._tcp` mDNS advert right away, while `liner.local` keeps working for the dashboard. The very first flash still has to go over USB (see Setup below); every update after that can go over OTA instead.
 
 ### Talking to Volumio
 
@@ -115,7 +125,7 @@ After 5 minutes of nothing playing, the idle screen starts cycling through gener
 |---|---|---|
 | Up | GPIO10 | Next track (`cmd=next`) |
 | Down | GPIO9 | Previous track (`cmd=prev`) |
-| Top | GPIO1 | Open Wi-Fi/Volumio setup — disconnects first if already connected |
+| Top | GPIO1 | Press: open Wi-Fi/Volumio setup (disconnects first if already connected). Hold 5 s: remove the web password |
 
 Button polling is non-blocking (`M5.update()` runs every loop iteration; Volumio polling is time-gated separately) — an earlier version blocked on a 5-second `delay()` between polls, which meant a quick tap could start and end entirely between checks and never register.
 
@@ -135,14 +145,14 @@ Button polling is non-blocking (`M5.update()` runs every loop iteration; Volumio
 
 3. **After flashing, press the power button once** to boot into the new firmware. In practice, esptool's software-triggered reset at the end of upload doesn't reliably boot this board into the app — a physical button press is needed. This sometimes takes a couple of tries.
 
-4. On first boot, it'll have nothing saved and open the setup portal automatically — connect to `Liner-Setup` from a phone or laptop and follow the on-screen IP to configure your network and Volumio host.
+4. On first boot, it'll have nothing saved and open setup automatically. Scan the QR codes on the screen with your phone (or join `Liner-Setup` and browse to `192.168.4.1`) to configure your network and Volumio host.
 
 From here on, firmware updates can go over OTA (`pio run -t upload --upload-port liner.local`) instead of repeating steps 2–3.
 
 ## Known limitations
 
 - Only the Tidal album art path is verified; local/Spotify/other-service art handling is untested (see stubs in `resolveAlbumArtUrl()`).
-- The setup portal and OTA updates are both unauthenticated — fine on a trusted home LAN, not hardened against a hostile network.
+- The dashboard password is optional and off by default, and OTA has no password. Fine on a trusted home LAN, not hardened against a hostile network.
 - Flashing and booting over USB both currently require manual button presses (see Setup) — software-triggered resets aren't reliable on this board/toolchain combination. OTA updates don't have this problem; they reboot on their own.
 
 <!-- org-footer -->

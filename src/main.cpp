@@ -19,11 +19,14 @@
 #include <WebServer.h>
 #include <Preferences.h>
 #include <ArduinoOTA.h>
+#include <DNSServer.h>
 
 #include "config.h"
+#include "web_ui.h"
 
-static const char* LINER_VERSION = "1.7.0";
+static const char* LINER_VERSION = "1.8.0";
 static const char* MDNS_HOSTNAME = "liner"; // also the OTA target: liner.local
+static const char* WEB_USER = "liner";      // username when the web password is on
 
 static const int PANEL_W = 400;
 static const int PANEL_H = 600;
@@ -95,6 +98,25 @@ String savedPassword;
 String savedVolumioHost;
 bool otaEnabled = true;
 bool screensaverEnabled = true;
+bool webAuthEnabled = false;
+String webPassword;
+
+DNSServer dnsServer;            // captive portal while in setup mode
+bool otaRunning = false;        // ArduinoOTA actually listening (see applyOtaState)
+bool setupScreenShown = false;  // the setup QR screen is what's on the panel now
+bool setupRequestedByUser = false;
+uint32_t setupSince = 0;
+uint32_t lastPollTime = 0;
+
+// Setup mode entered on its own (Wi-Fi lost or failed) retries the saved
+// network this often, but only while nobody is using the setup AP.
+static const uint32_t SETUP_RETRY_MS = 2UL * 60 * 1000;
+
+// Volumio health: after this many failed polls in a row (~15s) the panel
+// switches to a "can't reach Volumio" screen with a QR to the dashboard.
+static const int VOLUMIO_FAIL_THRESHOLD = 3;
+int volumioFailures = 0;
+bool volumioReachable = false;
 
 void loadSettings() {
   prefs.begin("liner", true); // read-only
@@ -103,27 +125,42 @@ void loadSettings() {
   savedVolumioHost = prefs.getString("vhost", VOLUMIO_HOST_DEFAULT);
   otaEnabled = prefs.getBool("ota", true);
   screensaverEnabled = prefs.getBool("screensaver", true);
+  webAuthEnabled = prefs.getBool("webauth", false);
+  webPassword = prefs.getString("webpass", "");
+  if (webPassword.length() == 0) webAuthEnabled = false;
   prefs.end();
 }
 
-void saveSettings(const String& ssid, const String& password, const String& vhost,
-                   bool ota, bool screensaver) {
+void saveNetwork(const String& ssid, const String& password, const String& vhost) {
   String host = vhost.length() ? vhost : String(VOLUMIO_HOST_DEFAULT);
   prefs.begin("liner", false); // read-write
   prefs.putString("ssid", ssid);
   prefs.putString("pass", password);
   prefs.putString("vhost", host);
-  prefs.putBool("ota", ota);
-  prefs.putBool("screensaver", screensaver);
   prefs.end();
   savedSsid = ssid;
   savedPassword = password;
   savedVolumioHost = host;
-  otaEnabled = ota;
-  screensaverEnabled = screensaver;
+}
+
+void saveOptions() {
+  prefs.begin("liner", false);
+  prefs.putBool("ota", otaEnabled);
+  prefs.putBool("screensaver", screensaverEnabled);
+  prefs.end();
+}
+
+void saveWebAuth(bool enabled, const String& password) {
+  prefs.begin("liner", false);
+  prefs.putBool("webauth", enabled);
+  prefs.putString("webpass", password);
+  prefs.end();
+  webAuthEnabled = enabled;
+  webPassword = password;
 }
 
 void showStatus(const String& msg) {
+  setupScreenShown = false;
   M5.Display.startWrite();
   M5.Display.fillScreen(TFT_WHITE);
   M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
@@ -137,6 +174,7 @@ void showStatus(const String& msg) {
 
 // Multi-line variant for setup mode, where the AP name + IP need their own lines.
 void showStatusLines(const String& line1, const String& line2, const String& line3) {
+  setupScreenShown = false;
   M5.Display.startWrite();
   M5.Display.fillScreen(TFT_WHITE);
   M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
@@ -155,239 +193,313 @@ void showStatusLines(const String& line1, const String& line2, const String& lin
   M5.Display.waitDisplay();
 }
 
-String htmlEscape(const String& s) {
-  String out = s;
-  out.replace("&", "&amp;");
-  out.replace("\"", "&quot;");
-  out.replace("<", "&lt;");
-  out.replace(">", "&gt;");
-  return out;
+// QR screens. M5GFX draws the code in plain black on white, which the
+// Spectra 6 panel reproduces exactly, so phones scan it straight off the glass.
+static const char* SETUP_AP_IP = "192.168.4.1"; // softAP default
+
+void drawCentered(const String& s, int y, const lgfx::IFont* font) {
+  M5.Display.setFont(font);
+  M5.Display.drawString(s, PANEL_W / 2, y);
 }
 
-// Shared page chrome: mobile-first, no external assets (device serves everything
-// itself), touch-friendly toggle switches, a details/summary accordion for tips
-// so the page stays short on a phone screen.
-const char* PAGE_STYLE =
-  "*{box-sizing:border-box;}"
-  "body{font-family:-apple-system,'Segoe UI',Roboto,sans-serif;max-width:480px;margin:0 auto;"
-  "padding:1.25em;line-height:1.45;color:#1a1a1a;}"
-  "h1{font-size:1.4em;margin:0 0 0.5em;}"
-  "h2{font-size:1.05em;margin:1.6em 0 0.6em;border-top:1px solid #e0e0dc;padding-top:1em;}"
-  ".status{background:#f4f4f0;border-radius:10px;padding:0.8em 1em;font-size:0.92em;}"
-  ".status div{margin:0.25em 0;}"
-  ".nowplaying{display:flex;gap:0.9em;align-items:center;background:#f4f4f0;"
-  "border-radius:10px;padding:0.8em;margin-top:0.8em;}"
-  ".nowplaying img{width:64px;height:64px;border-radius:8px;object-fit:cover;"
-  "flex-shrink:0;background:#ddd;}"
-  ".np-text{min-width:0;}"
-  ".np-title{font-weight:700;font-size:1em;}"
-  ".np-artist{font-size:0.9em;color:#333;}"
-  ".np-album{font-size:0.8em;color:#666;}"
-  ".np-meta{font-size:0.8em;font-weight:700;margin-top:0.25em;}"
-  ".np-idle{justify-content:center;color:#888;padding:1.1em;}"
-  "label{display:block;margin-top:1em;font-weight:600;font-size:0.95em;}"
-  "input,select{width:100%;padding:0.65em;font-size:1em;margin-top:0.35em;"
-  "border:1px solid #ccc;border-radius:8px;}"
-  "button{margin-top:1.6em;padding:0.85em;width:100%;font-size:1.05em;font-weight:600;"
-  "background:#1a1a1a;color:#fff;border:none;border-radius:10px;}"
-  ".toggle-row{display:flex;align-items:center;justify-content:space-between;margin-top:1.1em;}"
-  ".toggle-row span{font-weight:600;font-size:0.95em;}"
-  ".switch{position:relative;display:inline-block;width:50px;height:30px;flex-shrink:0;}"
-  ".switch input{opacity:0;width:0;height:0;}"
-  ".slider{position:absolute;cursor:pointer;inset:0;background:#ccc;border-radius:30px;transition:.2s;}"
-  ".slider:before{position:absolute;content:'';height:24px;width:24px;left:3px;bottom:3px;"
-  "background:#fff;border-radius:50%;transition:.2s;}"
-  "input:checked+.slider{background:#1a1a1a;}"
-  "input:checked+.slider:before{transform:translateX(20px);}"
-  "details{margin-top:0.6em;border-top:1px solid #eee;}"
-  "summary{font-weight:600;cursor:pointer;padding:0.7em 0;font-size:0.95em;}"
-  "details p{font-size:0.9em;color:#444;margin:0 0 0.8em;}"
-  "code{background:#f0f0ee;padding:0.15em 0.4em;border-radius:4px;font-size:0.9em;}"
-  "a{color:#1a1a1a;}"
-  // Hamburger nav: pure CSS (checkbox hack) slide-out drawer, no JS framework.
-  // The checkbox must precede the drawer/overlay in DOM order for the ~
-  // sibling selector below to reach them.
-  ".topbar{display:flex;align-items:center;justify-content:space-between;}"
-  ".topbar h1{margin:0;}"
-  ".nav-toggle{display:none;}"
-  ".hamburger{font-size:1.7em;line-height:1;padding:0.1em 0.35em;cursor:pointer;user-select:none;}"
-  ".nav-drawer{position:fixed;top:0;right:-250px;width:220px;height:100%;background:#fff;"
-  "box-shadow:-2px 0 16px rgba(0,0,0,0.18);padding:4em 1.5em 1.5em;"
-  "display:flex;flex-direction:column;gap:1.1em;transition:right .25s;z-index:10;}"
-  ".nav-drawer a{font-weight:600;font-size:1.05em;text-decoration:none;}"
-  ".nav-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.3);z-index:9;}"
-  ".nav-toggle:checked ~ .nav-drawer{right:0;}"
-  ".nav-toggle:checked ~ .nav-overlay{display:block;}";
+void beginScreen() {
+  setupScreenShown = false;
+  M5.Display.startWrite();
+  M5.Display.fillScreen(TFT_WHITE);
+  M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
+  M5.Display.setTextDatum(textdatum_t::middle_center);
+}
+
+void endScreen() {
+  M5.Display.endWrite();
+  feedWatchdog();
+  M5.Display.display();
+  M5.Display.waitDisplay();
+  feedWatchdog();
+}
+
+// Not on any Wi-Fi: first boot, a failed connect, or the top button. Step 1
+// joins the phone to the open setup AP; step 2 opens the dashboard (most
+// phones also pop it up on their own via the captive portal).
+void renderSetupScreen() {
+  beginScreen();
+  drawCentered("Set up Liner", 34, &fonts::FreeSansBold18pt7b);
+  drawCentered("1. Scan to join Wi-Fi", 82, &fonts::FreeSans12pt7b);
+  M5.Display.qrcode(String("WIFI:T:nopass;S:") + SETUP_AP_NAME + ";;", (PANEL_W - 200) / 2, 100, 200);
+  drawCentered("2. Scan to open setup", 330, &fonts::FreeSans12pt7b);
+  M5.Display.qrcode(String("http://") + SETUP_AP_IP + "/", (PANEL_W - 160) / 2, 350, 160);
+  drawCentered(String("Wi-Fi: ") + SETUP_AP_NAME, 538, &fonts::FreeSans9pt7b);
+  drawCentered(String("then browse to ") + SETUP_AP_IP, 564, &fonts::FreeSans9pt7b);
+  endScreen();
+  setupScreenShown = true;
+}
+
+// On Wi-Fi but Volumio isn't answering. The QR opens the dashboard on the
+// LAN, where the Volumio host can be fixed.
+void renderNetworkIssue() {
+  String url = "http://" + WiFi.localIP().toString() + "/";
+  beginScreen();
+  drawCentered("Can't reach Volumio", 60, &fonts::FreeSansBold18pt7b);
+  drawCentered(savedVolumioHost, 104, &fonts::FreeSans12pt7b);
+  drawCentered("Liner keeps retrying.", 136, &fonts::FreeSans9pt7b);
+  M5.Display.qrcode(url, (PANEL_W - 220) / 2, 180, 220);
+  drawCentered("Scan to open settings", 440, &fonts::FreeSans12pt7b);
+  drawCentered(String(MDNS_HOSTNAME) + ".local", 480, &fonts::FreeSans9pt7b);
+  drawCentered(WiFi.localIP().toString(), 506, &fonts::FreeSans9pt7b);
+  endScreen();
+}
+
+// ---------------------------------------------------------------------------
+// OTA
+//
+// Runs only while the toggle is on AND the device is on the LAN. ArduinoOTA's
+// own mDNS handling is off because ArduinoOTA.end() calls MDNS.end(), which
+// would take liner.local down with it; the _arduino._tcp advert is managed
+// here instead, so switching OTA off also stops advertising it.
+// ---------------------------------------------------------------------------
+
+void setupOta() {
+  ArduinoOTA.setHostname(MDNS_HOSTNAME);
+  ArduinoOTA.setMdnsEnabled(false);
+  ArduinoOTA.onStart([]() { Serial.println("OTA: update starting"); });
+  ArduinoOTA.onEnd([]() { Serial.println("OTA: update complete, rebooting"); });
+  ArduinoOTA.onProgress([](unsigned int done, unsigned int total) {
+    feedWatchdog();
+    Serial.printf("OTA: %u%%\n", (done * 100) / total);
+  });
+  ArduinoOTA.onError([](ota_error_t error) {
+    Serial.printf("OTA error [%u]: %s\n", error,
+      error == OTA_AUTH_ERROR ? "auth failed" :
+      error == OTA_BEGIN_ERROR ? "begin failed" :
+      error == OTA_CONNECT_ERROR ? "connect failed" :
+      error == OTA_RECEIVE_ERROR ? "receive failed" :
+      error == OTA_END_ERROR ? "end failed" : "unknown");
+  });
+}
+
+// Cheap enough to call every loop: it only acts when the wanted state changes.
+void applyOtaState() {
+  bool want = otaEnabled && !inSetupMode && WiFi.status() == WL_CONNECTED;
+  if (want == otaRunning) return;
+  if (want) {
+    ArduinoOTA.begin();
+    MDNS.enableArduino(3232, false);
+    Serial.printf("OTA ready at %s.local\n", MDNS_HOSTNAME);
+  } else {
+    ArduinoOTA.end();
+    MDNS.disableArduino();
+    Serial.println("OTA stopped");
+  }
+  otaRunning = want;
+}
+
+// ---------------------------------------------------------------------------
+// Web dashboard + JSON API
+//
+// GET  /             dashboard page (include/web_ui.h)
+// GET  /api/status   device, network, now playing and settings as JSON
+// GET  /api/scan     nearby Wi-Fi networks
+// POST /api/options  ota=0|1, screensaver=0|1 (applied immediately)
+// POST /api/auth     enabled=0|1, password=... (web password)
+// POST /save         ssid, password, vhost (Wi-Fi + Volumio host)
+//
+// With password protection on, every route asks for HTTP digest auth
+// (username "liner"), so the password never crosses the network in clear text.
+// POSTs must also carry an X-Liner header. The dashboard always sends it; a
+// custom header makes browsers run a CORS preflight the device never answers,
+// so another web page can't use your saved login to change settings.
+// ---------------------------------------------------------------------------
+
+bool authorized() {
+  if (!webAuthEnabled || webPassword.length() == 0) return true;
+  if (webServer.authenticate(WEB_USER, webPassword.c_str())) return true;
+  webServer.requestAuthentication(DIGEST_AUTH, "Liner", "Password required");
+  return false;
+}
+
+bool authorizedPost() {
+  if (!authorized()) return false;
+  if (!webServer.hasHeader("X-Liner")) {
+    webServer.send(403, "text/plain", "Use the Liner dashboard to change settings.");
+    return false;
+  }
+  return true;
+}
+
+void sendJson(int code, JsonDocument& doc) {
+  String out;
+  serializeJson(doc, out);
+  webServer.sendHeader("Cache-Control", "no-store");
+  webServer.send(code, "application/json", out);
+}
 
 void handleRoot() {
+  if (!authorized()) return;
+  webServer.sendHeader("Cache-Control", "no-store");
+  webServer.send_P(200, "text/html; charset=utf-8", DASHBOARD_HTML);
+}
+
+void handleStatus() {
+  if (!authorized()) return;
+  bool online = !inSetupMode && WiFi.status() == WL_CONNECTED;
+  JsonDocument d;
+  d["version"] = LINER_VERSION;
+  d["mode"] = inSetupMode ? "setup" : (online ? "online" : "offline");
+  d["ssid"] = inSetupMode ? String(SETUP_AP_NAME) : (online ? WiFi.SSID() : String(""));
+  d["ip"] = inSetupMode ? WiFi.softAPIP().toString() : (online ? WiFi.localIP().toString() : String(""));
+  if (online) d["rssi"] = WiFi.RSSI();
+  d["hostname"] = String(MDNS_HOSTNAME) + ".local";
+  d["savedSsid"] = savedSsid;
+  d["vhost"] = savedVolumioHost;
+  d["volumio"] = online && volumioReachable;
+  d["uptime"] = millis() / 1000;
+  d["ota"] = otaEnabled;
+  d["otaActive"] = otaRunning;
+  d["screensaver"] = screensaverEnabled;
+  d["auth"] = webAuthEnabled;
+  JsonObject np = d["np"].to<JsonObject>();
+  np["playing"] = cachedPlaying;
+  if (cachedPlaying) {
+    np["title"] = cachedTitle;
+    np["artist"] = cachedArtist;
+    np["album"] = cachedAlbum;
+    np["art"] = cachedArtUrl;
+    np["meta"] = cachedMetaLine;
+  }
+  sendJson(200, d);
+}
+
+void handleScan() {
+  if (!authorized()) return;
   int n = WiFi.scanNetworks();
-  String options;
+  JsonDocument d;
+  JsonArray arr = d.to<JsonArray>();
   for (int i = 0; i < n; i++) {
     String ssid = WiFi.SSID(i);
     if (ssid.length() == 0) continue;
-    options += "<option value=\"" + htmlEscape(ssid) + "\">" + htmlEscape(ssid) +
-               " (" + String(WiFi.RSSI(i)) + " dBm)</option>";
+    bool dup = false; // keep only the strongest entry per SSID (mesh APs)
+    for (JsonObject o : arr) {
+      if (ssid == o["ssid"].as<const char*>()) {
+        if (WiFi.RSSI(i) > o["rssi"].as<int>()) o["rssi"] = WiFi.RSSI(i);
+        dup = true;
+        break;
+      }
+    }
+    if (dup) continue;
+    JsonObject o = arr.add<JsonObject>();
+    o["ssid"] = ssid;
+    o["rssi"] = WiFi.RSSI(i);
+    o["secure"] = WiFi.encryptionType(i) != WIFI_AUTH_OPEN;
   }
-
-  String networkStatus = inSetupMode
-    ? "Setup mode &mdash; broadcasting <strong>" + String(SETUP_AP_NAME) + "</strong>"
-    : (WiFi.status() == WL_CONNECTED
-        ? "Connected to <strong>" + htmlEscape(WiFi.SSID()) + "</strong>"
-        : "Not connected");
-  String ipLine = inSetupMode ? WiFi.softAPIP().toString()
-                              : (WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : "&mdash;");
-
-  String nowPlaying;
-  if (cachedPlaying) {
-    nowPlaying =
-      "<div class='nowplaying'>"
-        "<img src='" + htmlEscape(cachedArtUrl) + "' alt='Album art' "
-          "onerror=\"this.style.visibility='hidden'\">"
-        "<div class='np-text'>"
-          "<div class='np-title'>" + htmlEscape(cachedTitle) + "</div>"
-          "<div class='np-artist'>" + htmlEscape(cachedArtist) + "</div>"
-          "<div class='np-album'>" + htmlEscape(cachedAlbum) + "</div>"
-          + (cachedMetaLine.length() ? "<div class='np-meta'>" + htmlEscape(cachedMetaLine) + "</div>" : "") +
-        "</div>"
-      "</div>";
-  } else {
-    nowPlaying = "<div class='nowplaying np-idle'>Nothing playing</div>";
-  }
-
-  String html =
-    "<!DOCTYPE html><html><head><meta charset='UTF-8'>"
-    "<meta name='viewport' content='width=device-width,initial-scale=1'>"
-    "<title>Liner</title><style>" + String(PAGE_STYLE) + "</style></head><body>"
-    "<input type='checkbox' id='navToggle' class='nav-toggle'>"
-    "<div class='topbar'>"
-      "<h1>Liner</h1>"
-      "<label for='navToggle' class='hamburger'>&#9776;</label>"
-    "</div>"
-    "<nav class='nav-drawer'>"
-      "<a href='#nowplaying' onclick=\"document.getElementById('navToggle').checked=false\">Now Playing</a>"
-      "<a href='#settings' onclick=\"document.getElementById('navToggle').checked=false\">Settings</a>"
-      "<a href='#troubleshooting' onclick=\"document.getElementById('navToggle').checked=false\">Troubleshooting</a>"
-    "</nav>"
-    "<label for='navToggle' class='nav-overlay'></label>"
-
-    "<div id='nowplaying'>"
-    "<div class='status'>"
-      "<div><strong>Firmware:</strong> v" + String(LINER_VERSION) + "</div>"
-      "<div><strong>Network:</strong> " + networkStatus + "</div>"
-      "<div><strong>IP:</strong> " + ipLine + "</div>"
-      "<div><strong>Volumio host:</strong> " + htmlEscape(savedVolumioHost) + "</div>"
-    "</div>"
-
-    + nowPlaying +
-    "</div>"
-
-    "<form method='POST' action='/save' id='settings'>"
-    "<h2>Wi-Fi &amp; Volumio</h2>"
-    "<label>Network</label>"
-    "<select onchange=\"document.getElementById('ssid').value=this.value\">"
-    "<option value=''>-- choose a network --</option>" + options + "</select>"
-    "<label>Or enter manually</label>"
-    "<input id='ssid' name='ssid' placeholder='SSID' value='" + htmlEscape(savedSsid) + "'>"
-    "<label>Password</label>"
-    "<input name='password' type='password' placeholder='leave blank to keep current'>"
-    "<label>Volumio host</label>"
-    "<input name='vhost' value='" + htmlEscape(savedVolumioHost) + "'>"
-
-    "<h2>Options</h2>"
-    "<div class='toggle-row'><span>OTA updates</span>"
-    "<label class='switch'><input type='checkbox' name='ota'" + (otaEnabled ? " checked" : "") +
-    "><span class='slider'></span></label></div>"
-    "<div class='toggle-row'><span>Idle screensaver</span>"
-    "<label class='switch'><input type='checkbox' name='screensaver'" + (screensaverEnabled ? " checked" : "") +
-    "><span class='slider'></span></label></div>"
-
-    "<button type='submit'>Save</button>"
-    "</form>"
-
-    "<h2 id='troubleshooting'>Troubleshooting</h2>"
-    "<details><summary>The screen isn't updating</summary>"
-    "<p>A full e-paper refresh takes 15&ndash;30 seconds and only happens when the track "
-    "actually changes &mdash; a pause there is normal, not a hang.</p></details>"
-    "<details><summary>No album art is showing</summary>"
-    "<p>Only Tidal's album art path is fully verified so far. Local files and Spotify may "
-    "not resolve art correctly yet &mdash; playback info should still work.</p></details>"
-    "<details><summary>Wi-Fi won't connect</summary>"
-    "<p>Double-check the password. If it's stuck, press the device's top button any time "
-    "to reopen this page over its own <code>" + String(SETUP_AP_NAME) + "</code> Wi-Fi network.</p></details>"
-    "<details><summary>Updating firmware over the air</summary>"
-    "<p>With OTA enabled above, push builds from PlatformIO:<br>"
-    "<code>pio run -t upload --upload-port liner.local</code></p></details>"
-    "<details><summary>Reporting an issue</summary>"
-    "<p>Include the firmware version shown above and what the device's screen shows. "
-    "<a href='https://github.com/m5stack-lab/Liner/issues'>Open an issue on GitHub</a>.</p></details>"
-
-    "</body></html>";
-
-  webServer.send(200, "text/html; charset=utf-8", html);
+  WiFi.scanDelete();
+  sendJson(200, d);
 }
 
-void handleSaveSettings() {
+void handleOptions() {
+  if (!authorizedPost()) return;
+  if (webServer.hasArg("ota")) otaEnabled = webServer.arg("ota") == "1";
+  if (webServer.hasArg("screensaver")) screensaverEnabled = webServer.arg("screensaver") == "1";
+  saveOptions();
+  applyOtaState();
+  handleStatus();
+}
+
+void handleAuth() {
+  if (!authorizedPost()) return;
+  bool enable = webServer.arg("enabled") == "1";
+  String pw = webServer.arg("password");
+  if (enable && (pw.length() < 4 || pw.length() > 64)) {
+    webServer.send(400, "text/plain", "Password must be 4 to 64 characters.");
+    return;
+  }
+  saveWebAuth(enable, enable ? pw : String(""));
+  Serial.printf("Web password %s\n", enable ? "set" : "removed");
+  JsonDocument d;
+  d["ok"] = true;
+  d["auth"] = webAuthEnabled;
+  sendJson(200, d);
+}
+
+void handleSaveNetwork() {
+  if (!authorizedPost()) return;
   String ssid = webServer.arg("ssid");
   String password = webServer.arg("password");
   String vhost = webServer.arg("vhost");
-  bool ota = webServer.hasArg("ota");
-  bool screensaver = webServer.hasArg("screensaver");
+  ssid.trim();
+  vhost.trim();
 
   if (ssid.length() == 0) {
-    webServer.send(400, "text/plain", "SSID is required — go back and try again.");
+    webServer.send(400, "text/plain", "Network name is required.");
     return;
   }
 
-  // The form never shows the saved password back (avoid leaking it into page
-  // source), so a blank field on an unchanged network means "keep it as-is",
-  // not "set it to empty".
+  // The dashboard never shows the saved password back, so a blank field on
+  // an unchanged network means "keep it as-is", not "set it to empty".
   bool networkChanged = (ssid != savedSsid) || (password.length() > 0 && password != savedPassword);
-  if (ssid == savedSsid && password.length() == 0) {
-    password = savedPassword;
-  }
+  if (ssid == savedSsid && password.length() == 0) password = savedPassword;
+  // Leaving setup mode always needs a connect, even with the same network.
+  bool reconnect = networkChanged || inSetupMode;
 
-  saveSettings(ssid, password, vhost, ota, screensaver);
+  if (vhost.length() && vhost != savedVolumioHost) volumioFailures = 0;
+  saveNetwork(ssid, password, vhost);
 
-  String body = "<h2>Saved</h2>";
-  if (networkChanged) {
-    body += "<p>Liner will now try to connect to \"" + htmlEscape(ssid) + "\".</p>"
-            "<p>Check the device screen for status.</p>";
-  } else {
-    body += "<p>Settings updated.</p>";
-  }
-  body += "<p><a href='/'>Back</a></p>";
+  JsonDocument d;
+  d["ok"] = true;
+  d["reconnecting"] = reconnect;
+  d["ssid"] = ssid;
+  sendJson(200, d);
 
-  webServer.send(200, "text/html; charset=utf-8",
-    "<html><head><meta name='viewport' content='width=device-width,initial-scale=1'></head>"
-    "<body style='font-family:-apple-system,sans-serif;text-align:center;margin-top:3em;padding:0 1em;'>"
-    + body + "</body></html>");
-
-  if (networkChanged) {
+  if (reconnect) {
     delay(500); // let the HTTP response flush before we disconnect
     showStatusLines("Connecting to", ssid, "...");
     pendingReconnect = true; // loop() will notice and attempt the real connect next
   }
 }
 
+// In setup mode every unknown URL (phones' captive-portal probes included)
+// is sent to the dashboard, so joining Liner-Setup opens it automatically.
+void handleNotFound() {
+  if (inSetupMode) {
+    webServer.sendHeader("Location", String("http://") + SETUP_AP_IP + "/");
+    webServer.send(302, "text/plain", "");
+    return;
+  }
+  webServer.send(404, "text/plain", "Not found");
+}
+
 // Registers routes and starts the web server exactly once. The server itself
 // stays up for the device's entire runtime, in both AP (setup) and STA
-// (normal) modes — see the comment above the Wi-Fi/Volumio setup section.
+// (normal) modes.
 void startWebServer() {
-  webServer.on("/", handleRoot);
-  webServer.on("/save", HTTP_POST, handleSaveSettings);
+  static const char* headers[] = {"X-Liner"};
+  webServer.collectHeaders(headers, 1);
+  webServer.on("/", HTTP_GET, handleRoot);
+  webServer.on("/api/status", HTTP_GET, handleStatus);
+  webServer.on("/api/scan", HTTP_GET, handleScan);
+  webServer.on("/api/options", HTTP_POST, handleOptions);
+  webServer.on("/api/auth", HTTP_POST, handleAuth);
+  webServer.on("/save", HTTP_POST, handleSaveNetwork);
+  webServer.onNotFound(handleNotFound);
   webServer.begin();
 }
 
-void startSetupMode() {
+// byUser: the top button was pressed. Setup mode entered on its own (lost or
+// failed Wi-Fi) keeps retrying the saved network in the background; one the
+// user asked for stays put until they save.
+void startSetupMode(bool byUser) {
   inSetupMode = true;
+  setupRequestedByUser = byUser;
+  setupSince = millis();
+  applyOtaState();
   WiFi.disconnect(true);
   WiFi.mode(WIFI_AP);
   WiFi.softAP(SETUP_AP_NAME);
   delay(100);
+  dnsServer.start(53, "*", WiFi.softAPIP());
 
-  String ip = WiFi.softAPIP().toString();
-  Serial.printf("Setup mode: connect to Wi-Fi \"%s\", then visit http://%s\n", SETUP_AP_NAME, ip.c_str());
-  showStatusLines("Connect to Wi-Fi:", SETUP_AP_NAME, "then visit " + ip);
+  Serial.printf("Setup mode: connect to Wi-Fi \"%s\", then visit http://%s\n", SETUP_AP_NAME,
+                WiFi.softAPIP().toString().c_str());
+  if (!setupScreenShown) renderSetupScreen(); // skip the 15-30s redraw on a retry
 }
 
 // Attempts to connect using saved credentials. Falls back to setup mode if
@@ -395,10 +507,12 @@ void startSetupMode() {
 void connectWiFi() {
   if (savedSsid.length() == 0) {
     Serial.println("No saved Wi-Fi credentials, entering setup mode.");
-    startSetupMode();
+    startSetupMode(false);
     return;
   }
 
+  bool wasInSetup = inSetupMode;
+  if (wasInSetup) dnsServer.stop();
   inSetupMode = false; // leaving AP mode (if we were in it) to attempt a real connection
   WiFi.mode(WIFI_STA);
   WiFi.begin(savedSsid.c_str(), savedPassword.c_str());
@@ -413,37 +527,37 @@ void connectWiFi() {
   if (WiFi.status() == WL_CONNECTED) {
     Serial.printf("\nConnected. IP: %s\n", WiFi.localIP().toString().c_str());
     MDNS.begin(MDNS_HOSTNAME); // also enables outgoing .local resolution
-
-    // OTA: no password, matching the setup portal's own trust model (local
-    // network only, convenience over hardening — see README). Callbacks exist
-    // purely for visibility — ArduinoOTA logs nothing on its own otherwise.
-    ArduinoOTA.setHostname(MDNS_HOSTNAME);
-    ArduinoOTA.onStart([]() { Serial.println("OTA: update starting"); });
-    ArduinoOTA.onEnd([]() { Serial.println("OTA: update complete, rebooting"); });
-    ArduinoOTA.onProgress([](unsigned int done, unsigned int total) {
-      Serial.printf("OTA: %u%%\n", (done * 100) / total);
-    });
-    ArduinoOTA.onError([](ota_error_t error) {
-      Serial.printf("OTA error [%u]: %s\n", error,
-        error == OTA_AUTH_ERROR ? "auth failed" :
-        error == OTA_BEGIN_ERROR ? "begin failed" :
-        error == OTA_CONNECT_ERROR ? "connect failed" :
-        error == OTA_RECEIVE_ERROR ? "receive failed" :
-        error == OTA_END_ERROR ? "end failed" : "unknown");
-    });
-    ArduinoOTA.begin();
-    Serial.printf("OTA ready at %s.local\n", MDNS_HOSTNAME);
+    MDNS.addService("http", "tcp", 80);
+    volumioFailures = 0;
+    applyOtaState();
+    if (wasInSetup || setupScreenShown) lastRenderedKey = "\x01__BOOT__\x01"; // replace the QR screen
   } else {
     Serial.println("\nWi-Fi connect failed, entering setup mode.");
-    startSetupMode();
+    startSetupMode(false);
   }
 }
 
-// Triggered by the top button: force re-entry into setup mode so the network
-// (or Volumio host) can be changed at any time, even while already connected.
+// Short press of the top button: setup mode on demand, so the network or
+// Volumio host can be changed at any time, even while connected.
 void enterSetupMode() {
   Serial.println("Top button: entering Wi-Fi setup mode.");
-  startSetupMode();
+  setupScreenShown = false; // always redraw on an explicit press
+  startSetupMode(true);
+}
+
+// Long press (5s) of the top button: removes the web password, the way back
+// in when it's forgotten. Needs hands on the device, so it can't be done remotely.
+void resetWebPassword() {
+  Serial.println("Top button held: removing web password.");
+  saveWebAuth(false, "");
+  showStatusLines("Web password", "removed", "");
+  delay(1500);
+  if (inSetupMode) {
+    renderSetupScreen();
+  } else {
+    lastRenderedKey = "\x01__BOOT__\x01"; // redraw now playing on the next poll
+    lastPollTime = 0;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -687,7 +801,7 @@ uint8_t* fetchAlbumArt(const String& url, size_t& outLen) {
       memcpy(buf + used, data, n);
       used += n;
       feedWatchdog();
-      if (WiFi.status() == WL_CONNECTED) ArduinoOTA.handle();
+      if (otaRunning) ArduinoOTA.handle();
       return n;
     }
     int available() override { return 0; }
@@ -744,6 +858,7 @@ int drawWrapped(const String& text, int x, int y, int maxWidth, int lineHeight) 
 }
 
 void renderIdle() {
+  setupScreenShown = false;
   M5.Display.startWrite();
   M5.Display.fillScreen(TFT_WHITE);
   M5.Display.setTextDatum(textdatum_t::middle_center);
@@ -759,6 +874,7 @@ void renderIdle() {
 // shown after a long stretch of nothing playing (see SCREENSAVER_DELAY_MS).
 // Purely decorative — no text, since it's not conveying information.
 void renderScreensaver() {
+  setupScreenShown = false;
   static const uint16_t palette[] = {TFT_BLACK, TFT_RED, TFT_YELLOW, TFT_BLUE, TFT_GREEN};
   static const int paletteCount = sizeof(palette) / sizeof(palette[0]);
 
@@ -806,6 +922,7 @@ void renderScreensaver() {
 // Returns true if album art was drawn.
 bool renderNowPlaying(const String& title, const String& artist, const String& album,
                        const String& artUrl, const String& metaLine) {
+  setupScreenShown = false;
   M5.Display.startWrite();
   M5.Display.fillScreen(TFT_WHITE);
 
@@ -894,6 +1011,7 @@ void setup() {
   Serial.println("[boot] display rotation set, drawing status...");
 
   loadSettings();
+  setupOta();
 
   showStatus("Connecting to Wi-Fi...");
   Serial.println("[boot] status drawn, connecting wifi...");
@@ -914,7 +1032,6 @@ void setup() {
   startWatchdog();
 }
 
-uint32_t lastPollTime = 0;
 uint32_t idleSince = 0;           // 0 = not currently idle
 uint32_t lastScreensaverRender = 0;
 
@@ -936,17 +1053,22 @@ void loop() {
     Serial.println("Down button: previous track");
     sendVolumioCommand("prev");
   }
-  if (M5.BtnC.wasPressed()) {
+  // Top button acts on release: a 5s hold removes the web password, a
+  // shorter press opens setup mode.
+  if (M5.BtnC.wasReleaseFor(5000)) {
+    if (webAuthEnabled) resetWebPassword();
+    else enterSetupMode();
+  } else if (M5.BtnC.wasReleased()) {
     enterSetupMode();
   }
 
   // The web server runs continuously in both AP and STA mode — see the note
   // above the Wi-Fi/Volumio setup section — so this is unconditional.
   webServer.handleClient();
+  if (inSetupMode) dnsServer.processNextRequest();
 
-  if (otaEnabled && WiFi.status() == WL_CONNECTED) {
-    ArduinoOTA.handle();
-  }
+  applyOtaState();
+  if (otaRunning) ArduinoOTA.handle();
 
   if (pendingReconnect) {
     pendingReconnect = false;
@@ -955,6 +1077,13 @@ void loop() {
   }
 
   if (inSetupMode) {
+    // Wi-Fi dropped or failed on its own: quietly retry the saved network now
+    // and then, as long as nobody is connected to the setup AP using it.
+    if (!setupRequestedByUser && savedSsid.length() &&
+        millis() - setupSince > SETUP_RETRY_MS && WiFi.softAPgetStationNum() == 0) {
+      Serial.println("Setup mode: retrying saved Wi-Fi");
+      connectWiFi(); // back to setup mode (screen untouched) if it fails again
+    }
     delay(2);
     return;
   }
@@ -973,7 +1102,19 @@ void loop() {
   lastPollTime = millis();
 
   JsonDocument doc;
-  if (fetchState(doc)) {
+  bool gotState = fetchState(doc);
+  if (!gotState) {
+    volumioReachable = false;
+    if (++volumioFailures == VOLUMIO_FAIL_THRESHOLD) {
+      Serial.println("Volumio unreachable, showing network screen");
+      cachedPlaying = false;
+      idleSince = 0;
+      renderNetworkIssue();
+      lastRenderedKey = "\x01__NETERR__\x01"; // any real state redraws over it
+    }
+  } else {
+    volumioFailures = 0;
+    volumioReachable = true;
     String status     = doc["status"]     | "";
     String title      = doc["title"]      | "";
     String artist     = doc["artist"]     | "";
