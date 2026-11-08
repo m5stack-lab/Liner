@@ -1,171 +1,236 @@
-<p align="center"><img src="docs/banner.svg" alt="Liner: Now-playing liner notes on a PaperColor e-paper board" width="100%"></p>
-
-# Liner
-
-[![Release](https://img.shields.io/github/v/release/m5stack-lab/Liner)](https://github.com/m5stack-lab/Liner/releases/latest)
-
-A "now playing" display for the [M5Stack PaperColor](https://docs.m5stack.com/en/core/PaperColor) — a 4" color e-paper dev board — driven by [Volumio](https://volumio.com/). It shows album art, title, and artist for whatever's currently playing, and refreshes automatically as tracks change.
-
-The name is a nod to *liner notes* — the printed text and art that ship inside physical album packaging. That's essentially what this recreates on e-paper.
+<p align="center"><img src="docs/banner.svg" alt="Liner: now-playing liner notes for Volumio 4, on an M5Stack PaperColor's six-color e-paper" width="100%"></p>
 
 <p align="center">
-  <img src="docs/liner-demo.svg" alt="Liner cycling through its Connecting, Now Playing, and Idle screens on an M5Stack PaperColor" width="360">
+  <a href="https://github.com/m5stack-lab/Liner/releases/latest"><img src="https://img.shields.io/github/v/release/m5stack-lab/Liner?label=release&color=2dd4bf" alt="Latest release"></a>
+  <img src="https://img.shields.io/badge/Volumio-4-3fb950" alt="Volumio 4">
+  <img src="https://img.shields.io/badge/ESP32--S3-PaperColor-e3b341" alt="ESP32-S3 PaperColor">
+  <img src="https://img.shields.io/badge/e--paper-Spectra%206-c0392b" alt="Spectra 6 e-paper">
+  <img src="https://img.shields.io/badge/built%20with-PlatformIO-1b3a6b" alt="Built with PlatformIO">
 </p>
 
-## Features
+<p align="center"><b>Now-playing liner notes for your <a href="https://volumio.com/">Volumio 4</a> streamer, on a 4" six-color e-paper screen.</b><br>
+Album art, title, artist and the format line on an <a href="https://docs.m5stack.com/en/core/PaperColor">M5Stack PaperColor</a>, plus a dashboard on your phone.<br>The screen only redraws when the music changes.</p>
 
-- **Now-playing card**: full-width album art on top, title/artist/album text below, plus a bold platform/format/bitrate line for the audio nerds (e.g. `TIDAL 44.1kHz/16bit  ·  1411 kbps`)
-- **Idle screen** when nothing is playing, cycling into a generative Spectra-6 screensaver after a long idle stretch
-- **Event-driven refresh** — only redraws when the track actually changes, since a full e-paper refresh takes 15–30 seconds
-- **Playback controls** — up/down buttons skip to the next/previous track
-- **Web dashboard** — no credentials baked into the firmware; a responsive dashboard (reachable both during first-time setup and, once connected, at `liner.local` on your normal LAN) shows a live Now Playing card and device status, and handles network/Volumio config, instant OTA/screensaver toggles, an optional password, and troubleshooting tips. Phones get bottom tabs; tablets and desktops get header tabs and a two-column layout
-- **QR codes on the screen** — when Liner isn't on Wi-Fi, the panel shows a QR to join its setup network and one to open setup; when Volumio can't be reached, it shows a QR to the dashboard. The dashboard's Settings tab shows the same address as a QR code (Liner's setup-network IP before a network is assigned, its LAN IP after), handy for opening it on a phone from a laptop. QR codes are drawn by Liner's own routine (`drawQr()`/`qrSvg()`) rather than `M5.Display.qrcode()`, which drops most dark modules on this toolchain
-- **Optional web password** — one switch in the dashboard; HTTP digest auth (username `liner`), and a 5-second hold of the top button removes it if forgotten
-- **OTA updates** — push new firmware over the network once it's on Wi-Fi, no more re-entering download mode for every change
-- **Album art from any source** — local files, Tidal, and (untested so far) Spotify/other Volumio plugins, via a service-aware resolver
+The name is a nod to *liner notes*: the printed text and art that ship inside an album's packaging. Liner recreates them on e-paper.
 
-## Volumio compatibility
+<p align="center"><img src="docs/liner-demo.svg" alt="An M5Stack PaperColor running Liner, cycling through setup with QR codes, connecting, now playing, a cached track change, Volumio unreachable, idle and the screensaver, each with an e-paper refresh flash" width="380"></p>
 
-Liner now requires **Volumio 4**. The album-art and state handling follow Volumio 4's API (v1.6.0 onward), and v1.8.0 is built and tested only against Volumio 4.
+### What it does
 
-Still on **Volumio 3**? Use **[v1.5.0](https://github.com/m5stack-lab/Liner/releases/tag/v1.5.0)** (`Liner-v1.5.0-merged.bin`, flash at `0x0`), the last release made for Volumio 3. It's an older build: it predates the v1.7.0 toolchain update, so its settings page still has CVE-2026-42854 (see [ROADMAP.md](ROADMAP.md)), and it doesn't have the dashboard, QR codes or password. Keep it on a home network you trust, or upgrade to Volumio 4 and use the latest release.
+- **Now playing on paper.** Full-width album art, title, artist, album and a bold format line for the audio nerds (`TIDAL 48 kHz/24 bit · 2304 kbps`)
+- **Redraws only on a track change.** A Spectra 6 refresh takes about 15 s, so Liner never refreshes for nothing
+- **Covers are ready before you need them.** The last 4 are cached, and the next two in Volumio's queue are fetched while the current track plays
+- **A dashboard for every screen.** Phone, tablet or laptop, light or dark, at `liner.local`
+- **QR codes on the glass.** For setup, and for when Volumio can't be reached
+- **Buttons.** Next, previous, and setup on demand
+- **Over-the-air updates**, switchable from the dashboard
+- **Idle screensaver** of generative Spectra 6 patterns
 
-## Hardware
+## What's new in v1.9
 
-- **Board**: M5Stack PaperColor — ESP32-S3R8 (16MB flash, 8MB octal PSRAM), 400×600 4" E Ink Spectra 6 (6-color) e-paper panel
-- **Buttons**: 3 user buttons (top = GPIO1, up = GPIO10, down = GPIO9) + 1 power button
-- **Network**: connects to Wi-Fi directly; polls Volumio over your LAN
+| Highlight | What changed |
+|---|---|
+| ⚡ **Faster covers** | Album covers are cached and the next two are pre-fetched for playlists. A cached track change skips the 1–2 s download |
+| 📱 **New dashboard** (v1.8) | Responsive on phone, tablet and laptop, dark mode, switches that apply instantly, an optional password, and a QR code to open it on your phone |
+| 🔁 **Dashboard leads, paper follows** (v1.8.1) | A new track shows on the dashboard about a second after it starts, while the e-paper is still refreshing |
+| 🔳 **QR codes on the screen** (v1.8) | Scan to join setup, scan to open setup, scan to fix an unreachable Volumio |
+| 🛡️ **Security** (v1.7) | Arduino-ESP32 3.3.12, which patches CVE-2026-42854 in the settings web server |
 
-## How it works
+Full notes: [releases](https://github.com/m5stack-lab/Liner/releases).
 
-<p align="center">
-  <img src="docs/liner-schematic.png" alt="Liner system schematic: Volumio, Tidal CDN and the wsrv.nl proxy over Wi-Fi into the ESP32-S3, the GPIO buttons, the Spectra 6 e-paper panel, and the main poll/redraw loop" width="100%">
-</p>
+## Built for Volumio 4
 
-### Firmware
+| Your Volumio | Use | Notes |
+|---|---|---|
+| **Volumio 4** | [**Latest release**](https://github.com/m5stack-lab/Liner/releases/latest) | Built and tested against Volumio 4 (v1.6.0 onward) |
+| Volumio 3 | [v1.5.0](https://github.com/m5stack-lab/Liner/releases/tag/v1.5.0) (`Liner-v1.5.0-merged.bin`, flash at `0x0`) | The last release made for Volumio 3. It predates the v1.7.0 toolchain update, so its settings page still has CVE-2026-42854 (see [ROADMAP.md](ROADMAP.md)), and it has no dashboard, QR codes or password. Keep it on a home network you trust, or upgrade to Volumio 4 |
 
-Built with [PlatformIO](https://platformio.org/) on the Arduino framework, using [M5Unified](https://github.com/m5stack/M5Unified) / [M5GFX](https://github.com/m5stack/M5GFX). `M5.begin()` auto-detects the PaperColor board and its `Panel_ED2208` e-paper driver — the firmware just draws normal RGB888 graphics, and the panel driver quantizes everything down to the 6-color Spectra palette automatically on `display()`.
+Liner talks to Volumio 4's REST API on port 3000 and needs no Volumio plugin:
 
-Because a full refresh takes 15–30 seconds, the main loop polls Volumio for state every few seconds but only triggers a screen redraw when the track (title/artist/album) actually changes — not on every poll.
+| Endpoint | When | Why |
+|---|---|---|
+| `GET /api/v1/getState` | every 2 s (every 30 s while Volumio is unreachable) | title, artist, album, cover, service, format, position |
+| `GET /api/v1/getQueue` | once after each redraw | the next two tracks' covers, to pre-fetch |
+| `GET /api/v1/commands/?cmd=next` · `prev` | on a button press | skip forward or back |
 
-### Wi-Fi setup and settings (no baked-in credentials)
+Volumio presents every source (local library, Tidal, Spotify, internet radio and more) through this one interface, so Liner doesn't need to know which service is playing. It only reads what Volumio reports.
 
-Wi-Fi credentials and the Volumio host aren't compile-time config — they live in NVS (via `Preferences`), set through the device's web dashboard. This is what lets one built binary (e.g. a release `.bin`, or something distributed through M5Burner) work for anyone, rather than requiring everyone to rebuild from source with their own network baked in.
+## The dashboard
 
-The same page serves two purposes depending on context:
+<p align="center"><img src="docs/dashboard.svg" alt="Liner's dashboard on a laptop in light mode and a phone in dark mode, touring the Now, Settings and Help tabs: a new track with an Updating screen status, switches flipping, the password form and a QR code" width="100%"></p>
 
-- **First-time setup** — opens automatically on first boot, if a saved network fails to connect, or any time you press the **top button** (which disconnects Wi-Fi first if already connected, so it doubles as an on-demand "switch networks" trigger). In this mode the device broadcasts its own access point (`Liner-Setup`) and the screen shows two QR codes: scan the first to join `Liner-Setup`, the second to open the dashboard. Most phones also open it on their own, because every web request on that network is redirected to the dashboard (a captive portal). If setup mode started on its own because Wi-Fi was lost, Liner retries the saved network every 2 minutes while nobody is connected to `Liner-Setup`.
-- **Ongoing settings, once connected** — the same page is also reachable at `http://liner.local/` (or the device's LAN IP) during normal operation, no need to disconnect from your real network to reach it. From here you can change the network/Volumio host, or flip the **OTA updates**, **idle screensaver** and **password protection** switches. Switches apply as soon as you tap them, and nothing interrupts playback unless you change the network.
+Open `http://liner.local/` (or Liner's IP) from anything on your network. It's one page served from Liner's flash. It works without the internet, and it lays itself out for the screen it's on:
 
-Saving with the network/password unchanged just updates settings in place; changing either triggers a reconnect (and, if it's mid-setup, exits the AP).
+- **Phones** get bottom tabs within thumb reach, large tap targets, and 16 px inputs so iOS doesn't zoom
+- **Tablets and laptops** get header tabs and a two-column layout. On wide screens, the album art sits beside the track and device info becomes a row of tiles
+- **Dark mode** follows your system
 
-If Volumio stops answering for about 15 seconds, the screen switches to a "Can't reach Volumio" page with a QR code to the dashboard, and goes back to Now Playing once Volumio answers again.
+| Tab | What's there |
+|---|---|
+| **Now** | The track playing (art, title, artist, album, format), a status pill (*Playing*, *Updating screen*, *No Volumio*, *Setup mode*), and device info: network, IP, `liner.local`, signal, Volumio host, firmware, uptime |
+| **Settings** | Switches for **OTA updates**, **Idle screensaver** and **Password protection** that apply as soon as you tap them. A **Wi-Fi & Volumio** form with an on-demand network scan. A **Scan to open** QR code with Liner's address (its setup-network IP before a network is set, its LAN IP after) |
+| **Help** | Answers for a frozen-looking screen, the QR screen, missing art, Wi-Fi trouble, OTA and a forgotten password |
 
-The dashboard is one static page served from flash (`include/web_ui.h`). It reads everything from a small JSON API (`/api/status`, `/api/scan`, `/api/options`, `/api/auth`, `/save`) and inserts device data as text, never as HTML. Requests that change settings must carry an `X-Liner` header, which the dashboard always sends and other websites can't, so a page open elsewhere in your browser can't change Liner's settings.
+**The dashboard leads, the paper follows.** Liner saves each new track's info before it starts drawing, and keeps answering the dashboard while the e-paper refreshes, so the page shows the new track within a poll (about 2 s). The pill reads **Updating screen** until the panel catches up. The dashboard reads the same state the e-paper uses, so opening it doesn't add any requests to Volumio.
 
-### Password protection
+<details>
+<summary><b>Password protection</b></summary>
 
-Off by default. Turn on **Password protection** in Settings and pick a password (4–64 characters). The browser then asks for it, with username `liner`. It uses HTTP digest auth, so the password isn't sent in clear text, though the rest of the page is still plain HTTP. Forgot it? Hold the device's **top button for 5 seconds**: the password is removed and the screen confirms it. The password protects the dashboard only, not OTA (see below).
+Off by default. Turn on **Password protection** in Settings and pick a password (4–64 characters). The browser then asks for it, with username `liner`. It uses HTTP digest auth, so the password isn't sent in clear text, though the rest of the page is still plain HTTP. Forgot it? Hold the device's **top button for 5 seconds**: the password is removed and the screen confirms it. The password protects the dashboard only, not OTA.
+</details>
 
-**Album art is cached and pre-fetched.** Liner keeps the last 4 covers in memory, so tracks from the same album skip the download. After each redraw it reads Volumio's queue and downloads the next two tracks' covers while the current one plays, which covers playlists where every track has a different cover (skipped on shuffle, where the next track isn't predictable). It checks Volumio every 2 s. On the device, a cached cover cuts 0.8–2 s per track change; most of what's left is the panel's own 15 s refresh.
+<details>
+<summary><b>The JSON API behind it</b></summary>
 
-`/api/status` includes a `lastRender` object with timings for the last redraw: `lagMs` (how far into the track Volumio already was when Liner noticed), `artMs` and `artCached` (cover download, or 0 from the cache), `decodeMs`, `textMs`, `transferMs` (dithering to the panel's 6 colours and sending it) and `refreshMs`.
+The page reads everything from a small API and inserts device data as text, never as HTML.
 
-**The dashboard leads, the paper follows.** Liner saves each new track's info before it starts drawing, and keeps answering the dashboard while the e-paper refreshes (15–30 s), so the web page shows the new track within one poll (about 5 s). The status pill reads **Updating screen** until the panel catches up. While Volumio is unreachable, Liner checks it every 30 s instead of every 5 s, because each failed check briefly blocks the web server; saving a new Volumio host retries right away.
+| Route | Does |
+|---|---|
+| `GET /api/status` | device, network, now playing, settings, and `lastRender` timings |
+| `GET /api/scan` | nearby Wi-Fi networks (503 while the screen is redrawing) |
+| `GET /api/qr.svg` | Liner's address as a QR code |
+| `POST /api/options` | `ota=0\|1`, `screensaver=0\|1`, applied immediately |
+| `POST /api/auth` | `enabled=0\|1`, `password=…` |
+| `POST /save` | `ssid`, `password`, `vhost` |
 
-The page also shows a **Now Playing** card (album art, title/artist/album, the platform/format/bitrate line) sourced from the same state the e-paper display uses — cached from the most recent Volumio poll rather than making its own extra request, so loading the page doesn't add load on Volumio.
+Requests that change settings must carry an `X-Liner` header. The dashboard always sends it, and other websites can't without a CORS preflight that Liner never answers, so a page open elsewhere in your browser can't change Liner's settings with your saved login.
 
-### OTA updates
+`lastRender` shows where the time went in the last redraw: `lagMs` (how far into the track Volumio already was when Liner noticed), `artMs` and `artCached` (cover download, or 0 from the cache), `decodeMs`, `textMs`, `transferMs` (dithering to the panel's 6 colours and sending it) and `refreshMs`.
+</details>
 
-Once connected, the device advertises itself at `liner.local` and accepts firmware pushed over the network:
+## One track change, end to end
 
-```
-pio run -t upload --upload-port liner.local
-```
+<p align="center"><img src="docs/track-change.svg" alt="Animation and chart: after a track change, the dashboard updates after about 1 second while the e-paper refreshes; v1.8 took 22.8 seconds end to end, v1.9 takes 19.6 seconds" width="100%"></p>
 
-OTA is on by default and has no password (convenience on a local network you already trust, not hardened against a hostile LAN). Turn it off with the **OTA updates** switch in the dashboard: that stops the OTA listener and its `_arduino._tcp` mDNS advert right away, while `liner.local` keeps working for the dashboard. The very first flash still has to go over USB (see Setup below); every update after that can go over OTA instead.
+| Step | v1.8 | v1.9 |
+|---|---:|---:|
+| Notice the change (average, half the polling interval) | 2.5 s | 1.0 s |
+| Download the cover | 1.7 s | 0 s (cached or pre-fetched) |
+| Decode the cover | 0.6 s | 0.6 s |
+| Dither to 6 colours and send to the panel | 3.2 s | 3.2 s |
+| E-paper refresh | 14.8 s | 14.8 s |
+| **Total** | **22.8 s** | **19.6 s** |
 
-### Talking to Volumio
+Measured on the device. The refresh is the Spectra 6 panel's own cycle, so Liner can't shorten it. The dashboard no longer waits for it.
 
-Volumio exposes a REST API on the local network. Liner polls:
+## Album art
 
-```
-GET http://<volumio-host>:3000/api/v1/getState
-```
+<p align="center"><img src="docs/cover-cache.svg" alt="Album lane: four tracks share one cover, downloaded once. Playlist lane: while each track plays, Liner pre-fetches the next two covers into a four-slot cache, so every change is a cache hit" width="100%"></p>
 
-which returns the current `status`, `title`, `artist`, `album`, `albumart`, and `service` (which plugin/source is playing — `mpd` for local files, `spop`/`volspotconnect2` for Spotify Connect, etc.). Playback controls use the same API's commands endpoint:
+Liner keeps the last **4 covers** in PSRAM (about 35 KB each). Every track of an album shares one cover, so the album downloads it once. For playlists, after each redraw Liner reads Volumio's queue and fetches the next two tracks' covers while the current one plays. On shuffle it skips this, since Volumio's next track isn't the next queue entry. Going back a track usually hits the cache too.
 
-```
-GET http://<volumio-host>:3000/api/v1/commands/?cmd=next
-GET http://<volumio-host>:3000/api/v1/commands/?cmd=prev
-```
+<details>
+<summary><b>Why the covers go through a proxy: the progressive JPEG problem</b></summary>
 
-Because Volumio abstracts every backend (local library, Tidal, Spotify, internet radio, ...) into this one interface, the firmware doesn't need to know anything about the specific streaming service — it just reads whatever Volumio reports.
+Volumio's `albumart` field is either:
 
-### Album art: the progressive JPEG problem
+- a **relative path** (`/albumart?...`): art Volumio serves itself, usually from local file tags. Fetched directly.
+- an **absolute URL** to a streaming service's CDN (for example Tidal's `resources.tidal.com`)
 
-The one place the source *does* matter is album art. Volumio's `albumart` field is either:
+Tidal, like many CDNs, serves album art as **progressive JPEG**. M5GFX's embedded JPEG decoder (TJpgDec) only supports baseline JPEG: fetching worked, but `drawJpg()` silently failed on every image.
 
-- a **relative path** (`/albumart?...`) — art Volumio serves itself, generally from local file tags — fetched directly, or
-- an **absolute URL** to a streaming service's CDN (e.g. Tidal's `resources.tidal.com`)
-
-Tidal (and many other CDNs) serve album art as **progressive JPEG**, which M5GFX's embedded JPEG decoder (TJpgDec) can't decode — it only supports baseline JPEG. Fetching worked fine; `drawJpg()` just silently failed on every image.
-
-The fix: external art URLs are routed through [wsrv.nl](https://wsrv.nl), a free public image-resizing proxy, which re-encodes the image as baseline JPEG and resizes it to the display's art box in one request:
+The fix: external art URLs go through [wsrv.nl](https://wsrv.nl), a free public image proxy, which re-encodes the image as baseline JPEG and resizes it to the art box in one request:
 
 ```
 https://wsrv.nl/?url=<encoded-source-url>&w=400&h=400&fit=cover&output=jpg
 ```
 
-This also shrinks the download significantly (a 105KB source image came back as 35KB), which helps given how slow a full-size fetch over Wi-Fi + HTTPS can be. Local Volumio-served art skips the proxy and is fetched directly, since it hasn't shown the same progressive-JPEG issue.
+That also shrinks the download (a 105 KB source came back as 35 KB). Volumio-served art skips the proxy, since it hasn't shown the same issue.
 
-Album art resolution is dispatched by Volumio's `service` field (`resolveAlbumArtUrl()` in `src/main.cpp`), so each source has its own clear spot for future quirks. **Only the Tidal path has actually been exercised** — local file (`mpd`) and Spotify (`spop`/`volspotconnect2`) branches exist as stubs that currently fall through to the same generic logic, untested.
+Resolution is dispatched by Volumio's `service` field (`resolveAlbumArtUrl()` in `src/main.cpp`), so each source has its own place for quirks. **Only the Tidal path has been exercised**; the local file (`mpd`) and Spotify (`spop`/`volspotconnect2`) branches currently fall through to the same generic logic, untested.
+</details>
 
-### Platform, format, and bitrate
+<details>
+<summary><b>The format line</b></summary>
 
-Below the album name, a bold line shows whatever Volumio's `getState` populated in `service`, `trackType`, `samplerate`, `bitdepth`, and `bitrate` — e.g. `TIDAL 44.1kHz/16bit  ·  1411 kbps` (`buildMetaLine()` in `src/main.cpp`). It's built defensively since not every service fills in all of these fields, and only appears at all when there's something to show.
+Below the album, a bold line shows whatever Volumio's `getState` filled in among `service`, `trackType`, `samplerate`, `bitdepth` and `bitrate`, for example `TIDAL 44.1kHz/16bit · 1411 kbps` (`buildMetaLine()` in `src/main.cpp`). Not every service fills in every field, so the line is built defensively and only appears when there's something to show.
 
-One quirk found via Tidal: Volumio's `trackType` field there reports the service name (`"Tidal"`) rather than an actual codec, which would otherwise duplicate the platform name shown right next to it (`Tidal · TIDAL 44.1kHz/16bit`). `buildMetaLine()` drops the redundant platform segment whenever `trackType` already matches it.
+One Tidal quirk: Volumio's `trackType` there reports the service name (`"Tidal"`) rather than a codec, which would repeat the platform name (`Tidal · TIDAL 44.1kHz/16bit`). `buildMetaLine()` drops the repeated segment.
+</details>
 
-### Idle screensaver
+## How it works
 
-After 5 minutes of nothing playing, the idle screen starts cycling through generative abstract patterns (scattered shapes, concentric rings, diagonal bands) built from the same Spectra 6 palette as the album art, changing every 10 minutes. Purely decorative — it's there so a stationary display isn't just static text for hours, without triggering more e-paper refreshes than that cadence can reasonably bear.
+<p align="center"><img src="docs/liner-schematic.svg" alt="Liner system schematic: the dashboard, Volumio 4, the wsrv.nl proxy and Tidal CDN over Wi-Fi into the ESP32-S3 with its flash, PSRAM cover cache, NVS settings and network stack; the GPIO buttons; the Spectra 6 e-paper panel; and the main loop" width="100%"></p>
 
-### Controls
+Built with [PlatformIO](https://platformio.org/) on the Arduino framework (Arduino-ESP32 3.3), using [M5Unified](https://github.com/m5stack/M5Unified) and [M5GFX](https://github.com/m5stack/M5GFX). `M5.begin()` detects the PaperColor and its `Panel_ED2208` e-paper driver. Liner draws ordinary RGB888 graphics, and the driver quantizes them to the six Spectra inks on `display()`.
 
-| Button | Location | Action |
-|---|---|---|
-| Up | GPIO10 | Next track (`cmd=next`) |
-| Down | GPIO9 | Previous track (`cmd=prev`) |
-| Top | GPIO1 | Press: open Wi-Fi/Volumio setup (disconnects first if already connected). Hold 5 s: remove the web password |
+The main loop never blocks for long: it reads the buttons, serves the dashboard, captive DNS and OTA, polls Volumio every 2 s, and redraws only when the track changes. The panel refreshes on its own once `display()` returns, and Liner's `waitPanel()` keeps serving the dashboard while it does. After a redraw it pre-fetches the next covers.
 
-Button polling is non-blocking (`M5.update()` runs every loop iteration; Volumio polling is time-gated separately) — an earlier version blocked on a 5-second `delay()` between polls, which meant a quick tap could start and end entirely between checks and never register.
+<details>
+<summary><b>QR codes, and an M5GFX bug</b></summary>
+
+QR codes on the panel and in the dashboard come from Liner's own `drawQr()` and `qrSvg()`, which use M5GFX's bundled encoder but read the module bits directly. `M5.Display.qrcode()` goes through `lgfx_qrcode_getModule()`, which is compiled as C, where M5GFX's header makes `bool` an `unsigned char`. It returns the raw bit (`0x40`, …), C++ callers read only bit 0, and most dark modules disappear.
+</details>
+
+<details>
+<summary><b>Idle screensaver</b></summary>
+
+After 5 minutes of nothing playing, the idle screen starts cycling through generative patterns (scattered shapes, concentric rings, diagonal bands) in the Spectra 6 inks, changing every 10 minutes. It keeps a stationary display from showing static text for hours, without refreshing more often than e-paper should.
+</details>
 
 ## Setup
 
-> **Prebuilt binary:** each [release](https://github.com/m5stack-lab/Liner/releases) includes a merged, single-file `.bin` (flash at offset `0x0`) alongside the source — no Wi-Fi/Volumio config baked in, since that's all handled by the on-device setup portal described above. Flash it and configure it like any other build.
+<p align="center"><img src="docs/setup-flow.svg" alt="Setup in four steps: Liner shows two QR codes; scanning the first joins Liner-Setup; the setup page opens by itself to pick your Wi-Fi; Liner joins your Wi-Fi and shows now playing" width="100%"></p>
+
+> **Prebuilt binary:** each [release](https://github.com/m5stack-lab/Liner/releases) includes a single merged `.bin` (flash at offset `0x0`). No Wi-Fi or Volumio settings are baked in; that's all done on the device.
 
 1. Build:
    ```
    pio run
    ```
 
-2. Flash. The PaperColor's factory firmware doesn't expose a USB serial console during normal boot, so you'll need to manually put it into download mode first: **hold the reset button** while it's connected over USB, then run:
+2. Flash. The PaperColor's factory firmware doesn't expose a USB serial console during normal boot, so put it into download mode first: **hold the reset button** while it's connected over USB, then run:
    ```
    pio run -t upload --upload-port /dev/cu.usbmodemXXXX
    ```
 
-3. **After flashing, press the power button once** to boot into the new firmware. In practice, esptool's software-triggered reset at the end of upload doesn't reliably boot this board into the app — a physical button press is needed. This sometimes takes a couple of tries.
+3. **After flashing, press the power button once** to boot the new firmware. esptool's software reset at the end of an upload doesn't reliably boot this board, so a physical press is needed, sometimes a couple of tries.
 
-4. On first boot, it'll have nothing saved and open setup automatically. Scan the QR codes on the screen with your phone (or join `Liner-Setup` and browse to `192.168.4.1`) to configure your network and Volumio host.
+4. On first boot Liner has nothing saved and starts setup. Scan the QR codes on the screen with your phone (or join `Liner-Setup` and browse to `192.168.4.1`), then pick your network and Volumio host.
 
-From here on, firmware updates can go over OTA (`pio run -t upload --upload-port liner.local`) instead of repeating steps 2–3.
+From then on, update over the air:
+
+```
+pio run -t upload --upload-port liner.local
+```
+
+<details>
+<summary><b>Wi-Fi settings, setup mode and recovery</b></summary>
+
+Wi-Fi credentials and the Volumio host live in NVS (via `Preferences`), not in the firmware, so one binary (a release `.bin`, or one from M5Burner) works for anyone.
+
+- **Setup mode** starts on first boot, when a saved network fails to connect, or whenever you press the **top button** (which disconnects first, so it doubles as "switch networks"). Liner broadcasts `Liner-Setup` and shows two QR codes. Every web request on that network is redirected to the dashboard (a captive portal), so most phones open it on their own. If setup mode started because Wi-Fi was lost, Liner retries the saved network every 2 minutes while nobody is connected to `Liner-Setup`.
+- **Once connected**, the same dashboard is at `http://liner.local/`. Saving with the network unchanged just updates settings; changing the network or password reconnects.
+- **Volumio unreachable** for about 15 s: the screen shows *Can't reach Volumio* with a QR code to the dashboard, and returns to now playing once Volumio answers.
+</details>
+
+<details>
+<summary><b>OTA updates</b></summary>
+
+OTA is on by default and has no password (a convenience on a network you trust, not hardened against a hostile one). The **OTA updates** switch in the dashboard turns it off completely: the OTA listener and its `_arduino._tcp` mDNS advert stop at once, while `liner.local` keeps working for the dashboard. The very first flash has to go over USB.
+</details>
+
+## Controls
+
+| Button | GPIO | Press | Hold 5 s |
+|---|---|---|---|
+| Up | 10 | Next track (`cmd=next`) | |
+| Down | 9 | Previous track (`cmd=prev`) | |
+| Top | 1 | Setup mode (disconnects first if connected) | Remove the web password |
+
+Buttons are read every loop (`M5.update()`), and Volumio polling is timed separately, so a quick tap always registers.
+
+## Hardware
+
+- **Board**: M5Stack PaperColor: ESP32-S3R8 with 16 MB flash and 8 MB octal PSRAM, and a 400×600 4" E Ink Spectra 6 (six-color) panel
+- **Buttons**: top (GPIO1), up (GPIO10), down (GPIO9), plus power
+- **Network**: 2.4 GHz Wi-Fi; talks to Volumio over your LAN
 
 ## Known limitations
 
-- Only the Tidal album art path is verified; local/Spotify/other-service art handling is untested (see stubs in `resolveAlbumArtUrl()`).
-- The dashboard password is optional and off by default, and OTA has no password. Fine on a trusted home LAN, not hardened against a hostile network.
-- Flashing and booting over USB both currently require manual button presses (see Setup) — software-triggered resets aren't reliable on this board/toolchain combination. OTA updates don't have this problem; they reboot on their own.
+- Only the Tidal album-art path is verified; local files, Spotify and other services are untested (see `resolveAlbumArtUrl()`).
+- The dashboard password is optional and off by default, and OTA has no password. Fine on a trusted home network, not hardened against a hostile one.
+- Flashing and booting over USB need manual button presses (see Setup). OTA updates don't; they reboot on their own.
 
 <!-- org-footer -->
 ---
