@@ -31,6 +31,10 @@ section[data-tab]{display:none}section[data-tab].on{display:block}
 .card{background:var(--card);border-radius:var(--r);padding:16px;margin:0 0 14px;border:1px solid var(--line)}
 .card h2{font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:0 0 10px;font-weight:700}
 .np-art{width:100%;aspect-ratio:1;border-radius:12px;background:var(--fill);object-fit:cover;display:block}
+.qrs{display:flex;flex-wrap:wrap;justify-content:center;gap:16px}
+.qr{flex:1 1 150px;max-width:220px;text-align:center;margin:0}
+.qr img{display:block;width:100%;aspect-ratio:1;background:#fff;border-radius:12px;padding:6px;border:1px solid var(--line)}
+.qr figcaption{font-size:14px;font-weight:600;margin-top:8px}.qr figcaption small{display:block;color:var(--muted);font-weight:400}
 .np-ph{display:flex;align-items:center;justify-content:center;font-size:64px;color:var(--muted)}
 .np-title{font-size:21px;font-weight:700;margin:14px 0 2px;line-height:1.25}
 .np-artist{font-size:17px}.np-album{color:var(--muted);font-size:15px}
@@ -158,6 +162,8 @@ section[data-tab="now"].on{grid-template-columns:minmax(0,3fr) minmax(0,2fr)}
       <button type="submit" id="netBtn">Save network</button>
     </form>
   </div>
+
+  <div class="card" id="qrCard" hidden><h2>Scan to open</h2><div class="qrs" id="qrs"></div></div>
 </section>
 
 <section data-tab="help">
@@ -220,6 +226,21 @@ function renderNowPlaying(s){
   }
 }
 
+// Liner's address as a QR code: its setup-network IP while no network is
+// assigned, its LAN IP once connected. Rebuilt only when mode or IP changes.
+function renderQr(s){
+  const card=$('qrCard'),key=s.mode+'|'+s.ip;
+  if(card.dataset.key===key)return;
+  card.dataset.key=key;
+  card.hidden=!s.ip;
+  if(!s.ip)return;
+  const f=el('figure','qr'),img=el('img');
+  img.alt='QR code for http://'+s.ip+'/';img.src='/api/qr.svg?t='+Date.now(); // fresh URL: never show a cached code from an older address or firmware
+  const c=el('figcaption',null,s.mode==='setup'?'Open setup on another device':'Open on your phone');
+  c.append(el('small',null,'http://'+s.ip+'/'+(s.mode==='setup'?' on '+s.ssid:'')));
+  f.append(img,c);$('qrs').replaceChildren(f);
+}
+
 function render(s){
   S=s;
   const pill=$('pill');let cls='ok',txt='Connected';
@@ -234,6 +255,7 @@ function render(s){
   else if(s.mode==='online'&&!s.volumio){b.hidden=false;b.textContent='Can’t reach Volumio at '+s.vhost+'. Check the host in Settings, or that Volumio is running.'}
 
   renderNowPlaying(s);
+  renderQr(s);
 
   const rows=[['Network',s.ssid||'—'],['IP address',s.ip||'—']];
   if(s.mode==='online'){rows.push(['Address',s.hostname]);if(s.rssi!=null)rows.push(['Signal',signal(s.rssi)+' ('+s.rssi+' dBm)'])}

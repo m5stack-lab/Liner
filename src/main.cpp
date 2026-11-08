@@ -24,6 +24,20 @@
 #include "config.h"
 #include "web_ui.h"
 
+// M5GFX's bundled QR encoder (the one behind M5.Display.qrcode()), reused to
+// serve the same codes to the dashboard as SVG. Its header defines generic
+// macro names, so they're dropped right after, as M5GFX itself does.
+#include <vector>
+#include <lgfx/utility/lgfx_qrcode.h>
+#undef MODE_NUMERIC
+#undef MODE_ALPHANUMERIC
+#undef MODE_BYTE
+#undef ECC_LOW
+#undef ECC_MEDIUM
+#undef ECC_QUARTILE
+#undef ECC_HIGH
+#undef LOCK_VERSION
+
 static const char* LINER_VERSION = "1.8.0";
 static const char* MDNS_HOSTNAME = "liner"; // also the OTA target: liner.local
 static const char* WEB_USER = "liner";      // username when the web password is on
@@ -193,9 +207,76 @@ void showStatusLines(const String& line1, const String& line2, const String& lin
   M5.Display.waitDisplay();
 }
 
-// QR screens. M5GFX draws the code in plain black on white, which the
-// Spectra 6 panel reproduces exactly, so phones scan it straight off the glass.
+// QR screens. Codes are plain black on white, which the Spectra 6 panel
+// reproduces exactly, so phones scan them straight off the glass.
 static const char* SETUP_AP_IP = "192.168.4.1"; // softAP default
+
+// What each QR code encodes, shared by the panel and the dashboard.
+// "wifi" joins the setup AP. Anything else is Liner's own address: its
+// setup-AP IP while no network is assigned, its LAN IP once connected (an IP
+// rather than liner.local, since not every phone resolves .local names).
+String qrText(const String& which) {
+  if (which == "wifi") return String("WIFI:T:nopass;S:") + SETUP_AP_NAME + ";;";
+  IPAddress ip = inSetupMode ? WiFi.softAPIP() : WiFi.localIP();
+  return "http://" + ip.toString() + "/";
+}
+
+// A QR code's module grid. Modules are read straight from the bit buffer
+// rather than through lgfx_qrcode_getModule(): that function is compiled as
+// C, where M5GFX's header makes `bool` an unsigned char, so it returns the raw
+// bit (0x80, 0x40, ...) and C++ callers, which expect 0 or 1, drop most dark
+// modules. M5.Display.qrcode() goes through that call too, so the panel uses
+// drawQr() below instead.
+struct QrGrid {
+  std::vector<uint8_t> modules;
+  QRCode qr = {};
+  int size() const { return qr.size; }
+  bool dark(int x, int y) const {
+    uint32_t i = (uint32_t)y * qr.size + x;
+    return (modules[i >> 3] >> (7 - (i & 7))) & 1;
+  }
+};
+
+bool makeQr(const String& text, QrGrid& g) {
+  for (uint8_t version = 1; version <= 10; version++) {
+    g.modules.assign(lgfx_qrcode_getBufferSize(version), 0);
+    if (lgfx_qrcode_initText(&g.qr, g.modules.data(), version, 0, text.c_str()) == 0) return true;
+  }
+  return false;
+}
+
+// Black on white inside a w x w square at (x, y), centered on whole pixels.
+void drawQr(const String& text, int x, int y, int w) {
+  QrGrid g;
+  if (!makeQr(text, g)) return;
+  int cell = w / g.size();
+  int off = (w - cell * g.size()) / 2;
+  M5.Display.fillRect(x, y, w, w, TFT_WHITE);
+  for (int r = 0; r < g.size(); r++)
+    for (int c = 0; c < g.size(); c++)
+      if (g.dark(c, r)) M5.Display.fillRect(x + off + c * cell, y + off + r * cell, cell, cell, TFT_BLACK);
+}
+
+// SVG of a QR code: one path, merged runs of dark modules, 2-module quiet zone.
+String qrSvg(const String& text) {
+  QrGrid g;
+  if (!makeQr(text, g)) return "";
+  const int q = 2, n = g.size() + q * 2;
+  String path;
+  path.reserve(g.size() * g.size() * 2);
+  for (int y = 0; y < g.size(); y++) {
+    for (int x = 0; x < g.size(); x++) {
+      if (!g.dark(x, y)) continue;
+      int run = 1;
+      while (x + run < g.size() && g.dark(x + run, y)) run++;
+      path += "M" + String(x + q) + " " + String(y + q) + "h" + String(run) + "v1h-" + String(run) + "z";
+      x += run - 1;
+    }
+  }
+  return "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 " + String(n) + " " + String(n) +
+         "' shape-rendering='crispEdges'><rect width='100%' height='100%' fill='#fff'/>"
+         "<path fill='#000' d='" + path + "'/></svg>";
+}
 
 void drawCentered(const String& s, int y, const lgfx::IFont* font) {
   M5.Display.setFont(font);
@@ -225,9 +306,9 @@ void renderSetupScreen() {
   beginScreen();
   drawCentered("Set up Liner", 34, &fonts::FreeSansBold18pt7b);
   drawCentered("1. Scan to join Wi-Fi", 82, &fonts::FreeSans12pt7b);
-  M5.Display.qrcode(String("WIFI:T:nopass;S:") + SETUP_AP_NAME + ";;", (PANEL_W - 200) / 2, 100, 200);
+  drawQr(qrText("wifi"), (PANEL_W - 200) / 2, 100, 200);
   drawCentered("2. Scan to open setup", 330, &fonts::FreeSans12pt7b);
-  M5.Display.qrcode(String("http://") + SETUP_AP_IP + "/", (PANEL_W - 160) / 2, 350, 160);
+  drawQr(qrText("address"), (PANEL_W - 160) / 2, 350, 160);
   drawCentered(String("Wi-Fi: ") + SETUP_AP_NAME, 538, &fonts::FreeSans9pt7b);
   drawCentered(String("then browse to ") + SETUP_AP_IP, 564, &fonts::FreeSans9pt7b);
   endScreen();
@@ -237,12 +318,12 @@ void renderSetupScreen() {
 // On Wi-Fi but Volumio isn't answering. The QR opens the dashboard on the
 // LAN, where the Volumio host can be fixed.
 void renderNetworkIssue() {
-  String url = "http://" + WiFi.localIP().toString() + "/";
+  String url = qrText("address");
   beginScreen();
   drawCentered("Can't reach Volumio", 60, &fonts::FreeSansBold18pt7b);
   drawCentered(savedVolumioHost, 104, &fonts::FreeSans12pt7b);
   drawCentered("Liner keeps retrying.", 136, &fonts::FreeSans9pt7b);
-  M5.Display.qrcode(url, (PANEL_W - 220) / 2, 180, 220);
+  drawQr(url, (PANEL_W - 220) / 2, 180, 220);
   drawCentered("Scan to open settings", 440, &fonts::FreeSans12pt7b);
   drawCentered(String(MDNS_HOSTNAME) + ".local", 480, &fonts::FreeSans9pt7b);
   drawCentered(WiFi.localIP().toString(), 506, &fonts::FreeSans9pt7b);
@@ -299,6 +380,7 @@ void applyOtaState() {
 // GET  /             dashboard page (include/web_ui.h)
 // GET  /api/status   device, network, now playing and settings as JSON
 // GET  /api/scan     nearby Wi-Fi networks
+// GET  /api/qr.svg   Liner's address as a QR code (setup-AP IP or LAN IP)
 // POST /api/options  ota=0|1, screensaver=0|1 (applied immediately)
 // POST /api/auth     enabled=0|1, password=... (web password)
 // POST /save         ssid, password, vhost (Wi-Fi + Volumio host)
@@ -367,6 +449,14 @@ void handleStatus() {
     np["meta"] = cachedMetaLine;
   }
   sendJson(200, d);
+}
+
+// GET /api/qr.svg: Liner's address as a QR code (see qrText). Takes no
+// input, so it can't be made to encode anything else.
+void handleQr() {
+  if (!authorized()) return;
+  webServer.sendHeader("Cache-Control", "no-store");
+  webServer.send(200, "image/svg+xml", qrSvg(qrText("address")));
 }
 
 void handleScan() {
@@ -476,6 +566,7 @@ void startWebServer() {
   webServer.on("/", HTTP_GET, handleRoot);
   webServer.on("/api/status", HTTP_GET, handleStatus);
   webServer.on("/api/scan", HTTP_GET, handleScan);
+  webServer.on("/api/qr.svg", HTTP_GET, handleQr);
   webServer.on("/api/options", HTTP_POST, handleOptions);
   webServer.on("/api/auth", HTTP_POST, handleAuth);
   webServer.on("/save", HTTP_POST, handleSaveNetwork);
