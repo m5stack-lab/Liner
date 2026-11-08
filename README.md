@@ -67,6 +67,10 @@ The dashboard is one static page served from flash (`include/web_ui.h`). It read
 
 Off by default. Turn on **Password protection** in Settings and pick a password (4–64 characters). The browser then asks for it, with username `liner`. It uses HTTP digest auth, so the password isn't sent in clear text, though the rest of the page is still plain HTTP. Forgot it? Hold the device's **top button for 5 seconds**: the password is removed and the screen confirms it. The password protects the dashboard only, not OTA (see below).
 
+**Album art is cached and pre-fetched.** Liner keeps the last 4 covers in memory, so tracks from the same album skip the download. After each redraw it reads Volumio's queue and downloads the next two tracks' covers while the current one plays, which covers playlists where every track has a different cover (skipped on shuffle, where the next track isn't predictable). It checks Volumio every 2 s. On the device, a cached cover cuts 0.8–2 s per track change; most of what's left is the panel's own 15 s refresh.
+
+`/api/status` includes a `lastRender` object with timings for the last redraw: `lagMs` (how far into the track Volumio already was when Liner noticed), `artMs` and `artCached` (cover download, or 0 from the cache), `decodeMs`, `textMs`, `transferMs` (dithering to the panel's 6 colours and sending it) and `refreshMs`.
+
 **The dashboard leads, the paper follows.** Liner saves each new track's info before it starts drawing, and keeps answering the dashboard while the e-paper refreshes (15–30 s), so the web page shows the new track within one poll (about 5 s). The status pill reads **Updating screen** until the panel catches up. While Volumio is unreachable, Liner checks it every 30 s instead of every 5 s, because each failed check briefly blocks the web server; saving a new Volumio host retries right away.
 
 The page also shows a **Now Playing** card (album art, title/artist/album, the platform/format/bitrate line) sourced from the same state the e-paper display uses — cached from the most recent Volumio poll rather than making its own extra request, so loading the page doesn't add load on Volumio.

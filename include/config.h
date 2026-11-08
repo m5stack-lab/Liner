@@ -10,8 +10,10 @@
 #define VOLUMIO_HOST_DEFAULT "volumio.local"
 #define VOLUMIO_PORT 3000
 
-// How often to poll Volumio's getState endpoint for changes.
-#define POLL_INTERVAL_MS 5000
+// How often to poll Volumio's getState endpoint for changes. Each poll is a
+// small local request; 2s means a track change is noticed ~1s after it
+// happens on average (it was 5s, ~2.5s on average).
+#define POLL_INTERVAL_MS 2000
 
 // Name of the setup Wi-Fi access point the device broadcasts when no network
 // is configured, a connection attempt fails, or the top button is pressed.

@@ -38,7 +38,7 @@
 #undef ECC_HIGH
 #undef LOCK_VERSION
 
-static const char* LINER_VERSION = "1.8.1";
+static const char* LINER_VERSION = "1.9.0";
 static const char* MDNS_HOSTNAME = "liner"; // also the OTA target: liner.local
 static const char* WEB_USER = "liner";      // username when the web password is on
 
@@ -183,6 +183,15 @@ void saveWebAuth(bool enabled, const String& password) {
 // new track within a poll while the paper catches up. Web handlers never draw
 // on the panel, so this can't re-enter the display code.
 bool panelBusy = false; // a now-playing redraw is underway (art download or refresh)
+
+// Where the time goes in the last now-playing redraw, reported in /api/status
+// as "lastRender". lagMs is how far into the track Volumio already was when
+// Liner noticed the change (its "seek"), i.e. the detection delay.
+struct RenderTiming {
+  uint32_t lagMs = 0, artMs = 0, artBytes = 0, decodeMs = 0, textMs = 0, waitPrevMs = 0, transferMs = 0, refreshMs = 0;
+  bool artCached = false; // cover came from the cache (no download)
+  uint32_t at = 0; // uptime (s) when the redraw finished
+} lastTiming;
 
 void serviceNetwork() {
   feedWatchdog();
@@ -467,6 +476,17 @@ void handleStatus() {
   d["screensaver"] = screensaverEnabled;
   d["auth"] = webAuthEnabled;
   d["panelBusy"] = panelBusy;
+  JsonObject lr = d["lastRender"].to<JsonObject>();
+  lr["lagMs"] = lastTiming.lagMs;
+  lr["artMs"] = lastTiming.artMs;
+  lr["artBytes"] = lastTiming.artBytes;
+  lr["artCached"] = lastTiming.artCached;
+  lr["decodeMs"] = lastTiming.decodeMs;
+  lr["textMs"] = lastTiming.textMs;
+  lr["waitPrevMs"] = lastTiming.waitPrevMs;
+  lr["transferMs"] = lastTiming.transferMs;
+  lr["refreshMs"] = lastTiming.refreshMs;
+  lr["at"] = lastTiming.at;
   JsonObject np = d["np"].to<JsonObject>();
   np["playing"] = cachedPlaying;
   if (cachedPlaying) {
@@ -949,6 +969,101 @@ uint8_t* fetchAlbumArt(const String& url, size_t& outLen) {
 }
 
 // ---------------------------------------------------------------------------
+// Album art cache + prefetch
+//
+// Downloading the cover (TLS to the wsrv.nl proxy, which fetches and
+// re-encodes it) is the slowest step before the e-paper refresh, so Liner
+// keeps the last few covers in PSRAM. Every track of an album shares one
+// cover. For playlists, where covers differ track to track, Liner fetches the
+// next two queued tracks' covers once a redraw finishes, while the current
+// track plays, so a track change (or a quick double skip) can go straight to
+// the panel. Going back one track usually hits the cache too.
+// ---------------------------------------------------------------------------
+
+struct ArtEntry {
+  String url;
+  uint8_t* data = nullptr;
+  size_t len = 0;
+  uint32_t used = 0; // millis() of last use, for least-recently-used eviction
+};
+// Previous + current + next two, ~50 KB each from the proxy; PSRAM has room.
+static const int ART_CACHE_SLOTS = 4;
+static const int PREFETCH_AHEAD = 2;
+ArtEntry artCache[ART_CACHE_SLOTS];
+
+ArtEntry* artCacheFind(const String& url) {
+  for (auto& e : artCache) {
+    if (e.data && e.url == url) {
+      e.used = millis();
+      return &e;
+    }
+  }
+  return nullptr;
+}
+
+// The cover for url, from the cache or downloaded into it. The cache owns the
+// buffer, so callers must not free it. *fromCache reports a cache hit.
+ArtEntry* getAlbumArt(const String& url, bool* fromCache = nullptr) {
+  if (fromCache) *fromCache = false;
+  if (url.length() == 0) return nullptr;
+  if (ArtEntry* hit = artCacheFind(url)) {
+    if (fromCache) *fromCache = true;
+    return hit;
+  }
+  size_t len = 0;
+  uint8_t* data = fetchAlbumArt(url, len);
+  if (!data) return nullptr;
+  ArtEntry* slot = &artCache[0];
+  for (auto& e : artCache) {
+    if (!e.data) { slot = &e; break; }
+    if (e.used < slot->used) slot = &e;
+  }
+  free(slot->data);
+  slot->url = url;
+  slot->data = data;
+  slot->len = len;
+  slot->used = millis();
+  return slot;
+}
+
+// Set after each now-playing redraw: the queue position on screen. loop()
+// then calls prefetchNextArt() once the panel is idle. Skipped on shuffle,
+// where Volumio's next track isn't the next queue entry.
+bool prefetchPending = false;
+int prefetchPosition = -1;
+
+void prefetchNextArt() {
+  prefetchPending = false;
+  HTTPClient http;
+  http.begin("http://" + savedVolumioHost + ":" + String(VOLUMIO_PORT) + "/api/v1/getQueue");
+  http.setTimeout(4000);
+  if (http.GET() != HTTP_CODE_OK) {
+    http.end();
+    return;
+  }
+  // Keep only what's needed: a long queue can be a big response.
+  JsonDocument filter;
+  filter["queue"][0]["albumart"] = true;
+  filter["queue"][0]["service"] = true;
+  JsonDocument q;
+  DeserializationError err = deserializeJson(q, http.getStream(), DeserializationOption::Filter(filter));
+  http.end();
+  if (err) return;
+  JsonArray queue = q["queue"].as<JsonArray>();
+  if (prefetchPosition < 0) return;
+  for (int next = prefetchPosition + 1;
+       next <= prefetchPosition + PREFETCH_AHEAD && next < (int)queue.size(); next++) {
+    String url = resolveAlbumArtUrl(queue[next]["albumart"] | "", queue[next]["service"] | "");
+    if (url.length() == 0 || artCacheFind(url)) continue; // e.g. same album: already cached
+    uint32_t t = millis();
+    bool ok = getAlbumArt(url) != nullptr;
+    Serial.printf("Prefetched cover for queue %d: %s in %lu ms\n", next, ok ? "ok" : "failed",
+                  (unsigned long)(millis() - t));
+    webServer.handleClient(); // between downloads, let the dashboard in
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Rendering
 // ---------------------------------------------------------------------------
 
@@ -1051,22 +1166,36 @@ bool renderNowPlaying(const String& title, const String& artist, const String& a
 
   // Album art, top full-width square.
   bool artDrawn = false;
+  uint32_t t = millis();
   if (artUrl.length()) {
-    size_t artLen = 0;
-    uint8_t* art = fetchAlbumArt(artUrl, artLen);
+    bool cached = false;
+    ArtEntry* entry = getAlbumArt(artUrl, &cached);
     feedWatchdog();
-    if (art) {
+    lastTiming.artMs = millis() - t;
+    lastTiming.artCached = cached;
+    t = millis();
+    if (entry) {
+      const uint8_t* art = entry->data;
+      size_t artLen = entry->len;
+      lastTiming.artBytes = artLen;
       // Volumio-local art is served as-is (any size, JPEG or PNG); proxied
       // art is already a 400px baseline JPEG. scale 0 = fit to the art box.
       bool isPng = artLen > 4 && art[0] == 0x89 && art[1] == 'P' && art[2] == 'N' && art[3] == 'G';
       bool ok = isPng
           ? M5.Display.drawPng(art, artLen, 0, 0, ART_SIZE, ART_SIZE, 0, 0, 0.0f, 0.0f)
           : M5.Display.drawJpg(art, artLen, 0, 0, ART_SIZE, ART_SIZE, 0, 0, 0.0f, 0.0f);
-      Serial.printf("  draw%s(len=%u) -> %s\n", isPng ? "Png" : "Jpg", (unsigned)artLen, ok ? "OK" : "FAILED");
-      free(art);
+      Serial.printf("  draw%s(len=%u, %s) -> %s\n", isPng ? "Png" : "Jpg", (unsigned)artLen,
+                    cached ? "cached" : "downloaded", ok ? "OK" : "FAILED");
+      if (!ok) { // don't keep a cover that can't be decoded
+        free(entry->data);
+        entry->data = nullptr;
+        entry->url = "";
+      }
       artDrawn = ok;
     }
   }
+  lastTiming.decodeMs = millis() - t;
+  t = millis();
   if (!artDrawn) {
     M5.Display.fillRect(0, 0, ART_SIZE, ART_SIZE, TFT_LIGHTGRAY);
     M5.Display.setTextDatum(textdatum_t::middle_center);
@@ -1105,9 +1234,19 @@ bool renderNowPlaying(const String& title, const String& artist, const String& a
   }
 
   M5.Display.endWrite();
+  lastTiming.textMs = millis() - t;
   feedWatchdog();
-  M5.Display.display();
+  t = millis();
+  waitPanel(); // a still-running previous refresh; display() would otherwise block on it
+  lastTiming.waitPrevMs = millis() - t;
+  panelBusy = true;
+  t = millis();
+  M5.Display.display(); // dither + send the image; the refresh then runs on its own
+  lastTiming.transferMs = millis() - t;
+  t = millis();
   waitPanel();
+  lastTiming.refreshMs = millis() - t;
+  lastTiming.at = millis() / 1000;
   feedWatchdog();
   return artDrawn;
 }
@@ -1131,6 +1270,10 @@ void setup() {
   Serial.printf("[boot] board = %s\n", M5.getBoard() == m5::board_t::board_M5PaperColor ? "PaperColor (detected correctly)" : "NOT PaperColor!");
 
   M5.Display.setRotation(0); // native portrait for PaperColor
+  // Every draw here calls display() itself, after waitPanel(). With auto
+  // display on, endWrite() would also start a refresh, blocking (without
+  // serving the dashboard) on any refresh still running.
+  M5.Display.setAutoDisplay(false);
   Serial.println("[boot] display rotation set, drawing status...");
 
   loadSettings();
@@ -1219,6 +1362,10 @@ void loop() {
   }
 
   // Volumio polling is time-gated instead of blocking, so buttons stay responsive.
+  // The panel is idle here (redraws finish before loop() moves on), so this
+  // is when the next track's cover gets fetched.
+  if (prefetchPending) prefetchNextArt();
+
   uint32_t pollInterval = volumioFailures >= VOLUMIO_FAIL_THRESHOLD ? VOLUMIO_RETRY_MS : POLL_INTERVAL_MS;
   if (millis() - lastPollTime < pollInterval) {
     delay(10);
@@ -1276,9 +1423,13 @@ void loop() {
       if (playing) {
         Serial.printf("  resolved art URL: \"%s\"\n", cachedArtUrl.c_str());
         Serial.printf("  meta line: \"%s\"\n", cachedMetaLine.c_str());
+        lastTiming = RenderTiming();
+        lastTiming.lagMs = doc["seek"] | 0;
         lastRenderArtOk = renderNowPlaying(title, artist, album, cachedArtUrl, cachedMetaLine);
         lastRenderedArtUrl = cachedArtUrl;
         idleSince = 0;
+        prefetchPosition = doc["position"] | -1;
+        prefetchPending = !(doc["random"] | false);
       } else {
         renderIdle();
         idleSince = millis();
