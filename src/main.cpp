@@ -38,7 +38,7 @@
 #undef ECC_HIGH
 #undef LOCK_VERSION
 
-static const char* LINER_VERSION = "1.8.0";
+static const char* LINER_VERSION = "1.8.1";
 static const char* MDNS_HOSTNAME = "liner"; // also the OTA target: liner.local
 static const char* WEB_USER = "liner";      // username when the web password is on
 
@@ -105,7 +105,7 @@ String cachedTitle, cachedArtist, cachedAlbum, cachedArtUrl, cachedMetaLine;
 Preferences prefs;
 WebServer webServer(80);
 bool inSetupMode = false;
-bool pendingReconnect = false; // set by handleSaveSettings() when the network was changed
+bool pendingReconnect = false; // set by handleSaveNetwork() when the network was changed
 
 String savedSsid;
 String savedPassword;
@@ -129,6 +129,10 @@ static const uint32_t SETUP_RETRY_MS = 2UL * 60 * 1000;
 // Volumio health: after this many failed polls in a row (~15s) the panel
 // switches to a "can't reach Volumio" screen with a QR to the dashboard.
 static const int VOLUMIO_FAIL_THRESHOLD = 3;
+// While Volumio is unreachable, poll it this rarely. A failed poll blocks for
+// its DNS/connect timeout and the dashboard can't answer meanwhile, so polling
+// every 5s would lock out the very page used to fix the host.
+static const uint32_t VOLUMIO_RETRY_MS = 30UL * 1000;
 int volumioFailures = 0;
 bool volumioReachable = false;
 
@@ -173,6 +177,29 @@ void saveWebAuth(bool enabled, const String& password) {
   webPassword = password;
 }
 
+// The e-paper refresh takes 15-30s, but the panel runs it on its own once
+// display() returns. Instead of blocking in waitDisplay(), Liner keeps
+// answering the dashboard (and OTA) in the meantime, so the web page shows a
+// new track within a poll while the paper catches up. Web handlers never draw
+// on the panel, so this can't re-enter the display code.
+bool panelBusy = false; // a now-playing redraw is underway (art download or refresh)
+
+void serviceNetwork() {
+  feedWatchdog();
+  webServer.handleClient();
+  if (inSetupMode) dnsServer.processNextRequest();
+  if (otaRunning) ArduinoOTA.handle();
+}
+
+void waitPanel() {
+  panelBusy = true;
+  while (M5.Display.displayBusy()) {
+    serviceNetwork();
+    delay(5);
+  }
+  panelBusy = false;
+}
+
 void showStatus(const String& msg) {
   setupScreenShown = false;
   M5.Display.startWrite();
@@ -183,7 +210,7 @@ void showStatus(const String& msg) {
   M5.Display.drawString(msg, PANEL_W / 2, PANEL_H / 2);
   M5.Display.endWrite();
   M5.Display.display();
-  M5.Display.waitDisplay();
+  waitPanel();
 }
 
 // Multi-line variant for setup mode, where the AP name + IP need their own lines.
@@ -204,7 +231,7 @@ void showStatusLines(const String& line1, const String& line2, const String& lin
   }
   M5.Display.endWrite();
   M5.Display.display();
-  M5.Display.waitDisplay();
+  waitPanel();
 }
 
 // QR screens. Codes are plain black on white, which the Spectra 6 panel
@@ -295,7 +322,7 @@ void endScreen() {
   M5.Display.endWrite();
   feedWatchdog();
   M5.Display.display();
-  M5.Display.waitDisplay();
+  waitPanel();
   feedWatchdog();
 }
 
@@ -439,6 +466,7 @@ void handleStatus() {
   d["otaActive"] = otaRunning;
   d["screensaver"] = screensaverEnabled;
   d["auth"] = webAuthEnabled;
+  d["panelBusy"] = panelBusy;
   JsonObject np = d["np"].to<JsonObject>();
   np["playing"] = cachedPlaying;
   if (cachedPlaying) {
@@ -461,6 +489,10 @@ void handleQr() {
 
 void handleScan() {
   if (!authorized()) return;
+  if (panelBusy) { // a scan would stall the album-art download mid-redraw
+    webServer.send(503, "text/plain", "Liner is updating its screen. Try again in a few seconds.");
+    return;
+  }
   int n = WiFi.scanNetworks();
   JsonDocument d;
   JsonArray arr = d.to<JsonArray>();
@@ -530,7 +562,10 @@ void handleSaveNetwork() {
   // Leaving setup mode always needs a connect, even with the same network.
   bool reconnect = networkChanged || inSetupMode;
 
-  if (vhost.length() && vhost != savedVolumioHost) volumioFailures = 0;
+  if (vhost.length() && vhost != savedVolumioHost) {
+    volumioFailures = 0;
+    lastPollTime = 0; // try the new host on the next loop
+  }
   saveNetwork(ssid, password, vhost);
 
   JsonDocument d;
@@ -539,11 +574,8 @@ void handleSaveNetwork() {
   d["ssid"] = ssid;
   sendJson(200, d);
 
-  if (reconnect) {
-    delay(500); // let the HTTP response flush before we disconnect
-    showStatusLines("Connecting to", ssid, "...");
-    pendingReconnect = true; // loop() will notice and attempt the real connect next
-  }
+  // loop() draws "Connecting to..." and reconnects; handlers never draw.
+  if (reconnect) pendingReconnect = true;
 }
 
 // In setup mode every unknown URL (phones' captive-portal probes included)
@@ -891,8 +923,7 @@ uint8_t* fetchAlbumArt(const String& url, size_t& outLen) {
       }
       memcpy(buf + used, data, n);
       used += n;
-      feedWatchdog();
-      if (otaRunning) ArduinoOTA.handle();
+      serviceNetwork(); // keep the dashboard answering during a slow download
       return n;
     }
     int available() override { return 0; }
@@ -958,7 +989,7 @@ void renderIdle() {
   M5.Display.drawString("Nothing Playing", PANEL_W / 2, PANEL_H / 2);
   M5.Display.endWrite();
   M5.Display.display();
-  M5.Display.waitDisplay();
+  waitPanel();
 }
 
 // Idle screensaver: a random abstract pattern in the Spectra 6 palette,
@@ -1007,12 +1038,13 @@ void renderScreensaver() {
 
   M5.Display.endWrite();
   M5.Display.display();
-  M5.Display.waitDisplay();
+  waitPanel();
 }
 
 // Returns true if album art was drawn.
 bool renderNowPlaying(const String& title, const String& artist, const String& album,
                        const String& artUrl, const String& metaLine) {
+  panelBusy = true; // cleared by waitPanel() once the refresh finishes
   setupScreenShown = false;
   M5.Display.startWrite();
   M5.Display.fillScreen(TFT_WHITE);
@@ -1075,7 +1107,7 @@ bool renderNowPlaying(const String& title, const String& artist, const String& a
   M5.Display.endWrite();
   feedWatchdog();
   M5.Display.display();
-  M5.Display.waitDisplay();
+  waitPanel();
   feedWatchdog();
   return artDrawn;
 }
@@ -1163,6 +1195,7 @@ void loop() {
 
   if (pendingReconnect) {
     pendingReconnect = false;
+    showStatusLines("Connecting to", savedSsid, "...");
     connectWiFi(); // handleSaveSettings() already saved the new credentials
     lastRenderedKey = "\x01__BOOT__\x01"; // force a fresh render once connected
   }
@@ -1186,7 +1219,8 @@ void loop() {
   }
 
   // Volumio polling is time-gated instead of blocking, so buttons stay responsive.
-  if (millis() - lastPollTime < POLL_INTERVAL_MS) {
+  uint32_t pollInterval = volumioFailures >= VOLUMIO_FAIL_THRESHOLD ? VOLUMIO_RETRY_MS : POLL_INTERVAL_MS;
+  if (millis() - lastPollTime < pollInterval) {
     delay(10);
     return;
   }

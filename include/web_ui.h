@@ -265,6 +265,7 @@ function render(s){
   if(s.mode==='setup'){cls='warn';txt='Setup mode'}
   else if(s.mode!=='online'){cls='bad';txt='Offline'}
   else if(!s.volumio){cls='warn';txt='No Volumio'}
+  else if(s.panelBusy){txt='Updating screen'}
   else if(s.np.playing){txt='Playing'}
   pill.className='pill '+cls;$('pillText').textContent=txt;
 
