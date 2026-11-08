@@ -67,6 +67,8 @@ The dashboard is one static page served from flash (`include/web_ui.h`). It read
 
 Off by default. Turn on **Password protection** in Settings and pick a password (4–64 characters). The browser then asks for it, with username `liner`. It uses HTTP digest auth, so the password isn't sent in clear text, though the rest of the page is still plain HTTP. Forgot it? Hold the device's **top button for 5 seconds**: the password is removed and the screen confirms it. The password protects the dashboard only, not OTA (see below).
 
+**The dashboard leads, the paper follows.** Liner saves each new track's info before it starts drawing, and keeps answering the dashboard while the e-paper refreshes (15–30 s), so the web page shows the new track within one poll (about 5 s). The status pill reads **Updating screen** until the panel catches up. While Volumio is unreachable, Liner checks it every 30 s instead of every 5 s, because each failed check briefly blocks the web server; saving a new Volumio host retries right away.
+
 The page also shows a **Now Playing** card (album art, title/artist/album, the platform/format/bitrate line) sourced from the same state the e-paper display uses — cached from the most recent Volumio poll rather than making its own extra request, so loading the page doesn't add load on Volumio.
 
 ### OTA updates
