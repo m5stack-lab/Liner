@@ -13,6 +13,8 @@
 #include <WiFi.h>
 #include <ESPmDNS.h>
 #include <HTTPClient.h>
+#include <WiFiClientSecure.h>
+#include <esp_task_wdt.h>
 #include <ArduinoJson.h>
 #include <WebServer.h>
 #include <Preferences.h>
@@ -20,7 +22,7 @@
 
 #include "config.h"
 
-static const char* LINER_VERSION = "1.5.0";
+static const char* LINER_VERSION = "1.6.0";
 static const char* MDNS_HOSTNAME = "liner"; // also the OTA target: liner.local
 
 static const int PANEL_W = 400;
@@ -34,6 +36,34 @@ static const uint32_t SCREENSAVER_DELAY_MS = 5UL * 60 * 1000;
 static const uint32_t SCREENSAVER_INTERVAL_MS = 10UL * 60 * 1000;
 
 String lastRenderedKey = "\x01__BOOT__\x01"; // sentinel so the first real state always renders
+
+// Album art state for the track currently on screen. Volumio 4 can report a
+// placeholder (or empty) albumart for the first poll of a new track and fill
+// in the real cover a moment later; if the first render couldn't draw art, a
+// later poll with a different art URL triggers one more redraw.
+String lastRenderedArtUrl;
+bool lastRenderArtOk = false;
+
+// Hang protection: if loop() stops making progress for this long, the task
+// watchdog reboots the device instead of leaving a frozen screen and a dead
+// web portal. Must exceed the worst legitimate stretch between feeds (one
+// art download, ~30s, or one e-paper refresh, ~30s; we feed in between).
+static const uint32_t WDT_TIMEOUT_S = 90;
+
+void feedWatchdog() { esp_task_wdt_reset(); }
+
+void startWatchdog() {
+#if ESP_ARDUINO_VERSION_MAJOR >= 3
+  esp_task_wdt_config_t cfg = {};
+  cfg.timeout_ms = WDT_TIMEOUT_S * 1000;
+  cfg.idle_core_mask = 0;
+  cfg.trigger_panic = true;
+  if (esp_task_wdt_reconfigure(&cfg) != ESP_OK) esp_task_wdt_init(&cfg);
+#else
+  esp_task_wdt_init(WDT_TIMEOUT_S, true); // reconfigures if already initialized
+#endif
+  esp_task_wdt_add(NULL); // the loop task
+}
 
 // Cached from the most recent successful poll, regardless of whether it
 // triggered an e-paper redraw — lets the web portal show current playback
@@ -508,7 +538,13 @@ String buildMetaLine(const String& service, const String& trackType,
   // as trackType instead of an actual codec — showing the platform segment
   // too would just repeat it (e.g. "Tidal · TIDAL 44.1kHz/16bit"). Skip the
   // platform segment in that case; trackType already conveys the source.
-  String platform = friendlyServiceName(service);
+  // Volumio 4 plays streaming services through MPD and reports them as
+  // service "mpd" with the real source in trackType (e.g. "tidal"), which
+  // would otherwise be labeled "Local".
+  String effectiveService = service;
+  String tt = trackType; tt.toLowerCase();
+  if (service == "mpd" && (tt == "tidal" || tt == "qobuz" || tt == "spotify")) effectiveService = tt;
+  String platform = friendlyServiceName(effectiveService);
   bool trackTypeIsPlatform = platform.length() && trackType.equalsIgnoreCase(platform);
   if (platform.length() && !trackTypeIsPlatform) parts[n++] = platform;
 
@@ -569,68 +605,107 @@ void sendVolumioCommand(const char* cmd) {
   http.end();
 }
 
-// Fetches raw bytes for the album art JPEG into a PSRAM buffer.
+// Fetches raw album art bytes (JPEG or PNG) into a PSRAM buffer.
 // Caller owns the returned buffer and must free() it. Returns nullptr on failure.
+//
+// Handles responses without a Content-Length (chunked transfer encoding, as
+// Volumio 4's Node/Express stack can send for /albumart) by reading until the
+// connection closes, and follows redirects (Volumio answers a cache miss on
+// /albumart with a redirect to its fallback image).
+static const size_t ART_MAX_BYTES = 2 * 1024 * 1024;
+
 uint8_t* fetchAlbumArt(const String& url, size_t& outLen) {
   if (url.length() == 0) return nullptr;
 
   HTTPClient http;
-  http.begin(url);
-  http.setTimeout(5000);
+  WiFiClient plainClient;
+  WiFiClientSecure tlsClient;
+  bool ok;
+  if (url.startsWith("https://")) {
+    tlsClient.setInsecure(); // public album art; no secrets on this connection
+    ok = http.begin(tlsClient, url);
+  } else {
+    ok = http.begin(plainClient, url);
+  }
+  if (!ok) {
+    Serial.println("  art: http.begin() failed");
+    return nullptr;
+  }
+  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+  http.setRedirectLimit(5);
+  http.setTimeout(8000);
+  http.setConnectTimeout(8000);
+  const char* hdrs[] = {"Content-Type", "Transfer-Encoding"};
+  http.collectHeaders(hdrs, 2);
+
   int code = http.GET();
   Serial.printf("  art HTTP GET -> code=%d\n", code);
   if (code != HTTP_CODE_OK) {
-    Serial.printf("Album art fetch failed, HTTP %d\n", code);
+    Serial.printf("Album art fetch failed, HTTP %d (%s)\n", code,
+                  code < 0 ? http.errorToString(code).c_str() : "");
     http.end();
     return nullptr;
   }
 
-  int len = http.getSize();
-  Serial.printf("  art content-length=%d\n", len);
-  if (len <= 0) {
+  int len = http.getSize(); // -1 when the server sends no Content-Length
+  Serial.printf("  art content-length=%d type=%s transfer-encoding=%s\n", len,
+                http.header("Content-Type").c_str(), http.header("Transfer-Encoding").c_str());
+  if (len == 0 || len > (int)ART_MAX_BYTES) {
     http.end();
     return nullptr;
   }
 
-  uint8_t* buf = (uint8_t*)ps_malloc(len);
+  size_t cap = len > 0 ? (size_t)len : 64 * 1024;
+  uint8_t* buf = (uint8_t*)ps_malloc(cap);
   if (!buf) {
     Serial.println("ps_malloc failed for album art buffer");
     http.end();
     return nullptr;
   }
 
-  // Overall cap generous enough for a slow local transfer; per-byte "stall" cap
-  // (no progress at all) catches genuine hangs without punishing a slow-but-steady fetch.
-  WiFiClient* stream = http.getStreamPtr();
-  size_t received = 0;
-  uint32_t overallStart = millis();
-  uint32_t lastProgress = millis();
-  while (received < (size_t)len && millis() - overallStart < 25000 && millis() - lastProgress < 8000) {
-    // Service OTA here too — this loop can run for several seconds, and an
-    // in-progress OTA transfer needs ArduinoOTA.handle() called frequently
-    // throughout, not just once per outer loop() iteration, or it stalls.
-    if (WiFi.status() == WL_CONNECTED) ArduinoOTA.handle();
-    if (stream->available()) {
-      int n = stream->read(buf + received, len - received);
-      if (n > 0) {
-        received += n;
-        lastProgress = millis();
+  // writeToStream() handles both Content-Length and chunked bodies (it
+  // de-chunks for us). This sink grows the PSRAM buffer as data arrives and
+  // keeps OTA and the watchdog serviced during a slow transfer.
+  class BufSink : public Stream {
+   public:
+    uint8_t*& buf; size_t& cap; size_t used = 0; bool oom = false;
+    BufSink(uint8_t*& b, size_t& c) : buf(b), cap(c) {}
+    size_t write(uint8_t c) override { return write(&c, 1); }
+    size_t write(const uint8_t* data, size_t n) override {
+      if (oom) return 0;
+      if (used + n > cap) {
+        size_t ncap = cap;
+        while (used + n > ncap) ncap *= 2;
+        if (ncap > ART_MAX_BYTES) { oom = true; return 0; }
+        uint8_t* nb = (uint8_t*)ps_realloc(buf, ncap);
+        if (!nb) { oom = true; return 0; }
+        buf = nb; cap = ncap;
       }
-    } else {
-      delay(5);
+      memcpy(buf + used, data, n);
+      used += n;
+      feedWatchdog();
+      if (WiFi.status() == WL_CONNECTED) ArduinoOTA.handle();
+      return n;
     }
-  }
+    int available() override { return 0; }
+    int read() override { return -1; }
+    int peek() override { return -1; }
+    void flush() override {}
+  } sink(buf, cap);
+
+  int written = http.writeToStream(&sink);
   http.end();
 
-  if (received != (size_t)len) {
-    Serial.printf("Album art incomplete: %u/%d bytes\n", (unsigned)received, len);
+  if (written < 0 || sink.oom || sink.used == 0 || (len > 0 && sink.used != (size_t)len)) {
+    Serial.printf("Album art incomplete: %u bytes (expected %d, writeToStream=%d, oom=%d)\n",
+                  (unsigned)sink.used, len, written, sink.oom);
     free(buf);
     return nullptr;
   }
   Serial.printf("  art download complete: %u bytes, first bytes: %02X %02X %02X %02X\n",
-                (unsigned)received, buf[0], buf[1], buf[2], buf[3]);
+                (unsigned)sink.used, buf[0], buf[1], buf[2], buf[3]);
 
-  outLen = received;
+  outLen = sink.used;
   return buf;
 }
 
@@ -725,7 +800,8 @@ void renderScreensaver() {
   M5.Display.waitDisplay();
 }
 
-void renderNowPlaying(const String& title, const String& artist, const String& album,
+// Returns true if album art was drawn.
+bool renderNowPlaying(const String& title, const String& artist, const String& album,
                        const String& artUrl, const String& metaLine) {
   M5.Display.startWrite();
   M5.Display.fillScreen(TFT_WHITE);
@@ -735,9 +811,15 @@ void renderNowPlaying(const String& title, const String& artist, const String& a
   if (artUrl.length()) {
     size_t artLen = 0;
     uint8_t* art = fetchAlbumArt(artUrl, artLen);
+    feedWatchdog();
     if (art) {
-      bool ok = M5.Display.drawJpg(art, artLen, 0, 0, ART_SIZE, ART_SIZE);
-      Serial.printf("  drawJpg(len=%u) -> %s\n", (unsigned)artLen, ok ? "OK" : "FAILED");
+      // Volumio-local art is served as-is (any size, JPEG or PNG); proxied
+      // art is already a 400px baseline JPEG. scale 0 = fit to the art box.
+      bool isPng = artLen > 4 && art[0] == 0x89 && art[1] == 'P' && art[2] == 'N' && art[3] == 'G';
+      bool ok = isPng
+          ? M5.Display.drawPng(art, artLen, 0, 0, ART_SIZE, ART_SIZE, 0, 0, 0.0f, 0.0f)
+          : M5.Display.drawJpg(art, artLen, 0, 0, ART_SIZE, ART_SIZE, 0, 0, 0.0f, 0.0f);
+      Serial.printf("  draw%s(len=%u) -> %s\n", isPng ? "Png" : "Jpg", (unsigned)artLen, ok ? "OK" : "FAILED");
       free(art);
       artDrawn = ok;
     }
@@ -780,8 +862,11 @@ void renderNowPlaying(const String& title, const String& artist, const String& a
   }
 
   M5.Display.endWrite();
+  feedWatchdog();
   M5.Display.display();
   M5.Display.waitDisplay();
+  feedWatchdog();
+  return artDrawn;
 }
 
 // ---------------------------------------------------------------------------
@@ -793,6 +878,7 @@ void setup() {
   Serial.begin(115200);
   delay(200);
   Serial.printf("\n[boot] Liner v%s\n", LINER_VERSION);
+  Serial.printf("[boot] reset reason = %d\n", (int)esp_reset_reason()); // 6/7 = watchdog
   randomSeed(esp_random()); // hardware TRNG, for the idle screensaver patterns
 
   auto cfg = M5.config();
@@ -821,6 +907,8 @@ void setup() {
     showStatus("Wi-Fi failed. Retrying...");
   }
   // if inSetupMode, connectWiFi() already drew the setup-mode screen
+
+  startWatchdog();
 }
 
 uint32_t lastPollTime = 0;
@@ -833,6 +921,7 @@ void loop() {
   // any tap that starts and ends between polls, since wasPressed() only sees
   // transitions across successive update() calls.
   M5.update();
+  feedWatchdog();
 
   // Button mapping (per M5Unified's PaperColor pin table): BtnA=G10 (up),
   // BtnB=G9 (down), BtnC=G1 (top).
@@ -908,13 +997,18 @@ void loop() {
       cachedMetaLine = buildMetaLine(service, trackType, samplerate, bitdepth, bitrate);
     }
 
-    if (key != lastRenderedKey) {
+    bool artRetry = playing && key == lastRenderedKey && !lastRenderArtOk &&
+                    cachedArtUrl.length() && cachedArtUrl != lastRenderedArtUrl;
+    if (artRetry) Serial.println("Album art changed after a failed draw, redrawing");
+
+    if (key != lastRenderedKey || artRetry) {
       Serial.printf("Track change -> %s (service=%s)\n", key.c_str(), service.c_str());
       Serial.printf("  raw albumart field: \"%s\"\n", art.c_str());
       if (playing) {
         Serial.printf("  resolved art URL: \"%s\"\n", cachedArtUrl.c_str());
         Serial.printf("  meta line: \"%s\"\n", cachedMetaLine.c_str());
-        renderNowPlaying(title, artist, album, cachedArtUrl, cachedMetaLine);
+        lastRenderArtOk = renderNowPlaying(title, artist, album, cachedArtUrl, cachedMetaLine);
+        lastRenderedArtUrl = cachedArtUrl;
         idleSince = 0;
       } else {
         renderIdle();
