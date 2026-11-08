@@ -26,7 +26,7 @@ Advisories reviewed and **not** applicable: Bluetooth (BT unused), the ESP-IDF h
 
 ### P1 · Settings portal accepts cross-site requests
 
-- [ ] Reject `POST /save` unless `Origin`/`Referer` matches the device's own host, or require a per-boot token embedded in the form
+- [x] Every settings POST requires an `X-Liner` header, which cross-site pages can't send without a CORS preflight the device never answers — v1.8.0
 
 Any web page open in a browser on the same LAN can submit the settings form and change the Wi-Fi network, Volumio host or OTA toggle.
 
@@ -34,11 +34,11 @@ Any web page open in a browser on the same LAN can submit the settings form and 
 
 - [ ] Set an OTA password with `ArduinoOTA.setPassword()`, generated per device and shown in the portal
 - [ ] Or default OTA to **off** and let the user opt in
+- [x] The OTA switch now fully stops the OTA listener and its mDNS advert (before, it only skipped `handle()` in the main loop) — v1.8.0
 
 ### P1 · HTML escaping misses single quotes
 
-- [ ] Add `'` → `&#39;` to `htmlEscape()`
-- [ ] Audit every value inserted into a single-quoted attribute (SSID, Volumio host, album-art URL)
+- [x] Replaced by the v1.8.0 dashboard: device data (SSIDs, Volumio host, track info, art URL) arrives as JSON and is inserted with `textContent`, never parsed as HTML
 
 Values such as a nearby network's name or Volumio's album-art path end up inside single-quoted attributes, so they can break out of them.
 
@@ -65,6 +65,11 @@ Values such as a nearby network's name or Volumio's album-art path end up inside
 - [ ] Re-check Espressif and Arduino-ESP32 advisories on each release
 
 ## Features and known limitations
+
+- [x] Optional dashboard password (digest auth, 5 s top-button hold removes it) — v1.8.0
+- [x] QR codes on the panel for setup and for "can't reach Volumio" — v1.8.0
+- [x] Responsive dashboard: bottom tabs on phones, header tabs and two columns on tablets and desktops — v1.8.0
+- [ ] Verify on hardware: setup-mode QR screen, captive portal pop-up, Wi-Fi retry from setup mode, 5 s button hold
 
 - [ ] Verify album art for local files (`mpd`) and Spotify (`spop`/`volspotconnect2`). Only Tidal is exercised today
 - [ ] Make flashing and booting over USB work without manual button presses
