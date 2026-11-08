@@ -68,3 +68,9 @@ Values such as a nearby network's name or Volumio's album-art path end up inside
 
 - [ ] Verify album art for local files (`mpd`) and Spotify (`spop`/`volspotconnect2`). Only Tidal is exercised today
 - [ ] Make flashing and booting over USB work without manual button presses
+- [ ] 
+
+## Add QR code to setup screen 
+## Add set password to the stup as an option 
+Update font style 
+
