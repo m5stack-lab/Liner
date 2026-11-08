@@ -22,7 +22,7 @@
 
 #include "config.h"
 
-static const char* LINER_VERSION = "1.6.0";
+static const char* LINER_VERSION = "1.7.0";
 static const char* MDNS_HOSTNAME = "liner"; // also the OTA target: liner.local
 
 static const int PANEL_W = 400;
@@ -617,9 +617,12 @@ static const size_t ART_MAX_BYTES = 2 * 1024 * 1024;
 uint8_t* fetchAlbumArt(const String& url, size_t& outLen) {
   if (url.length() == 0) return nullptr;
 
-  HTTPClient http;
+  // Declaration order matters: locals are destroyed in reverse, and on
+  // Arduino-ESP32 3.x ~HTTPClient() calls stop() on its client. The clients
+  // must outlive `http`, or that call jumps through a dead vtable.
   WiFiClient plainClient;
   WiFiClientSecure tlsClient;
+  HTTPClient http;
   bool ok;
   if (url.startsWith("https://")) {
     tlsClient.setInsecure(); // public album art; no secrets on this connection

@@ -8,9 +8,10 @@ Tracks known issues and planned work for Liner. Security items come from a revie
 
 ### P0 · Toolchain is end-of-life and carries a remotely reachable CVE
 
-- [ ] Pin the platform to `platformio/espressif32 @ 8.0.0` (Arduino-ESP32 3.3.12, ESP-IDF 5.x)
-- [ ] Port to Arduino-ESP32 3.x APIs and confirm M5Unified/M5GFX still detect the PaperColor panel
-- [ ] Verify on hardware: setup portal, OTA, Tidal art, buttons, screensaver
+- [x] Pin the platform to `platformio/espressif32 @ 8.0.0` (Arduino-ESP32 3.3.12, ESP-IDF 5.x) — v1.7.0
+- [x] Port to Arduino-ESP32 3.x APIs and confirm M5Unified/M5GFX still detect the PaperColor panel — v1.7.0
+- [x] Verify on hardware: boot, Wi-Fi, portal page, Tidal art (v1.7.0)
+- [ ] Verify on hardware: setup AP, OTA, buttons, screensaver
 - [ ] Cut a release from the new toolchain
 
 The v1.5.0 binary was built on Arduino-ESP32 2.0.17, which uses ESP-IDF v4.4.7 and mbedTLS 2.28.7. ESP-IDF v4.4 reached end of life in July 2024, and mbedTLS 2.28 is also end of life, so neither gets security fixes.
@@ -44,7 +45,7 @@ Values such as a nearby network's name or Volumio's album-art path end up inside
 ### P2 · HTTPS certificates aren't verified
 
 - [ ] Use the bundled CA store (`setCACertBundle`) for the wsrv.nl album-art fetch instead of the default insecure mode
-- [ ] Cap the album-art `Content-Length` before `ps_malloc()`
+- [x] Cap the album-art `Content-Length` before `ps_malloc()` — v1.6.0
 
 `HTTPClient` without a CA certificate calls `setInsecure()`, so any certificate is accepted.
 
@@ -54,7 +55,7 @@ Values such as a nearby network's name or Volumio's album-art path end up inside
 
 ### P2 · Builds aren't reproducible
 
-- [ ] Pin exact versions for the platform, M5Unified and ArduinoJson in `platformio.ini`
+- [x] Pin exact versions for the platform, M5Unified and ArduinoJson in `platformio.ini` — v1.7.0
 - [ ] Add a GitHub Actions build that produces the release `.bin`, so the toolchain in each release is recorded
 
 ### P3 · Hardening
