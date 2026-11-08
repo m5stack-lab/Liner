@@ -45,7 +45,8 @@ section[data-tab]{display:none}section[data-tab].on{display:block}
 .rows{margin:0;padding:0;list-style:none}
 .rows li{display:flex;justify-content:space-between;gap:12px;padding:11px 0;border-top:1px solid var(--line);font-size:15px}
 .rows li:first-child{border-top:0;padding-top:2px}
-.rows span{color:var(--muted)}.rows b{font-weight:600;text-align:right;overflow-wrap:anywhere}
+.rows span{color:var(--muted)}
+.rows .sub{font-weight:400;color:var(--muted);margin-left:6px}.rows b{font-weight:600;text-align:right;overflow-wrap:anywhere}
 .tog{display:flex;align-items:center;gap:14px;min-height:56px;padding:6px 0;border-top:1px solid var(--line)}
 .tog:first-of-type{border-top:0}
 .tog div{flex:1;min-width:0}.tog strong{display:block;font-size:16px}.tog small{display:block;color:var(--muted);font-size:13px}
@@ -101,19 +102,34 @@ nav a.on{background:var(--card);box-shadow:0 1px 2px rgba(0,0,0,.08)}
 main{max-width:1080px;padding:0 24px}
 section[data-tab].on{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:20px;align-items:start}
 section[data-tab] .card,.banner{margin:0}
-.banner,section[data-tab="help"] .card{grid-column:1/-1}
-section[data-tab="help"] .card{columns:2;column-gap:40px}
-section[data-tab="help"] .card h2{column-span:all}
-section[data-tab="help"] details{break-inside:avoid}
+.banner{grid-column:1/-1}
+/* Settings: options with the QR code under it on the left, Wi-Fi on the right. */
+section[data-tab="settings"].on{grid-template-areas:"opt wifi" "qr wifi";grid-template-rows:auto 1fr}
+#optCard{grid-area:opt}#wifiCard{grid-area:wifi}#qrCard{grid-area:qr}
+#qrCard .qrs{justify-content:flex-start}
+#qrCard .qr{display:flex;align-items:center;gap:20px;max-width:none;text-align:left}
+#qrCard .qr img{width:150px;flex-shrink:0}
+#qrCard figcaption{margin:0;font-size:16px}
+/* Help: an even two-column list. */
+section[data-tab="help"] .card{grid-column:1/-1;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);column-gap:40px;align-items:start}
+section[data-tab="help"] h2{grid-column:1/-1}
+section[data-tab="help"] details:nth-of-type(2){border-top:0}
 #toast{bottom:24px}
 }
-/* Desktop: now playing becomes art beside text. */
+/* Desktop: now playing becomes a wide card with big art, device info a strip of tiles under it. */
 @media (min-width:1100px){
-section[data-tab="now"].on{grid-template-columns:minmax(0,3fr) minmax(0,2fr)}
-#np:not(:has(.np-idle)){display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);column-gap:24px;align-content:start}
-#np .np-art{grid-row:1/span 5}
-#np .np-title{margin-top:4px}
-#np .np-meta{justify-self:start;align-self:start}
+section[data-tab="now"].on{grid-template-columns:minmax(0,1fr)}
+#np:not(:has(.np-idle)){display:grid;grid-template-columns:minmax(0,380px) minmax(0,1fr);gap:40px;align-items:center;padding:24px}
+#np .np-title{font-size:34px;line-height:1.15;margin:0 0 8px}
+#np .np-artist{font-size:22px}
+#np .np-album{font-size:17px}
+#np .np-meta{margin-top:20px;font-size:14px}
+#np .np-idle{padding:72px 0}
+#dev{display:grid;grid-template-columns:repeat(auto-fit,minmax(118px,1fr));gap:10px}
+#dev li{flex-direction:column;justify-content:flex-start;gap:2px;border:0;padding:12px 14px;background:var(--fill);border-radius:12px}
+#dev li:first-child{padding-top:12px}
+#dev b{text-align:left}
+#dev .sub{display:block;margin:0;font-size:13px}
 }
 </style></head><body>
 <header><div class="bar"><h1>Liner</h1>
@@ -131,7 +147,7 @@ section[data-tab="now"].on{grid-template-columns:minmax(0,3fr) minmax(0,2fr)}
 </section>
 
 <section data-tab="settings">
-  <div class="card"><h2>Options</h2>
+  <div class="card" id="optCard"><h2>Options</h2>
     <div class="tog"><div><strong>OTA updates</strong><small id="otaNote">Push firmware over Wi-Fi</small></div>
       <label class="sw"><input type="checkbox" id="ota" aria-label="OTA updates"><span></span></label></div>
     <div class="tog"><div><strong>Idle screensaver</strong><small>Patterns after 5 min of nothing playing</small></div>
@@ -217,8 +233,10 @@ function renderNowPlaying(s){
     const ph=()=>el('div','np-art np-ph','\u266A');
     let art=ph();
     if(s.np.art){art=el('img','np-art');art.alt='';art.src=s.np.art;art.onerror=()=>art.replaceWith(ph())}
-    np.append(art,el('div','np-title',s.np.title),el('div','np-artist',s.np.artist),el('div','np-album',s.np.album));
-    if(s.np.meta)np.append(el('span','np-meta',s.np.meta));
+    const t=el('div','np-text');
+    t.append(el('div','np-title',s.np.title),el('div','np-artist',s.np.artist),el('div','np-album',s.np.album));
+    if(s.np.meta)t.append(el('span','np-meta',s.np.meta));
+    np.append(art,t);
   }else{
     const d=el('div','np-idle');d.append(el('b',null,'Nothing playing'),
       document.createTextNode(s.mode==='online'?'Start something in Volumio and it shows up here.':'Waiting for the network.'));
@@ -258,9 +276,9 @@ function render(s){
   renderQr(s);
 
   const rows=[['Network',s.ssid||'—'],['IP address',s.ip||'—']];
-  if(s.mode==='online'){rows.push(['Address',s.hostname]);if(s.rssi!=null)rows.push(['Signal',signal(s.rssi)+' ('+s.rssi+' dBm)'])}
+  if(s.mode==='online'){rows.push(['Address',s.hostname]);if(s.rssi!=null)rows.push(['Signal',signal(s.rssi),s.rssi+' dBm'])}
   rows.push(['Volumio',s.vhost],['Firmware','v'+s.version],['Uptime',fmtUptime(s.uptime)]);
-  const ul=$('dev');ul.replaceChildren(...rows.map(([k,v])=>{const li=el('li');li.append(el('span',null,k),el('b',null,v));return li}));
+  const ul=$('dev');ul.replaceChildren(...rows.map(([k,v,sub])=>{const li=el('li'),b=el('b',null,v);if(sub)b.append(el('small','sub',sub));li.append(el('span',null,k),b);return li}));
 
   $('ota').checked=s.ota;$('screensaver').checked=s.screensaver;
   $('otaNote').textContent=s.ota?(s.otaActive?'On: pio run -t upload --upload-port '+s.hostname:'On, starts once Liner is on Wi-Fi'):'Off: USB flashing only';
