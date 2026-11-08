@@ -24,6 +24,12 @@ The name is a nod to *liner notes* — the printed text and art that ship inside
 - **OTA updates** — push new firmware over the network once it's on Wi-Fi, no more re-entering download mode for every change
 - **Album art from any source** — local files, Tidal, and (untested so far) Spotify/other Volumio plugins, via a service-aware resolver
 
+## Volumio compatibility
+
+Liner now requires **Volumio 4**. The album-art and state handling follow Volumio 4's API (v1.6.0 onward), and v1.8.0 is built and tested only against Volumio 4.
+
+Still on **Volumio 3**? Use **[v1.5.0](https://github.com/m5stack-lab/Liner/releases/tag/v1.5.0)** (`Liner-v1.5.0-merged.bin`, flash at `0x0`), the last release made for Volumio 3. It's an older build: it predates the v1.7.0 toolchain update, so its settings page still has CVE-2026-42854 (see [ROADMAP.md](ROADMAP.md)), and it doesn't have the dashboard, QR codes or password. Keep it on a home network you trust, or upgrade to Volumio 4 and use the latest release.
+
 ## Hardware
 
 - **Board**: M5Stack PaperColor — ESP32-S3R8 (16MB flash, 8MB octal PSRAM), 400×600 4" E Ink Spectra 6 (6-color) e-paper panel
